@@ -1,0 +1,113 @@
+-- LGT Rechnungstool / Supabase PostgreSQL 17+
+-- Nur auf einer bewusst ausgewählten, eigenständigen Supabase-Datenbank ausführen.
+-- Benutzende werden ausschliesslich vom Administrator via Supabase Auth angelegt.
+-- Nach dem Anlegen: INSERT INTO public.lgt_staff(user_id) VALUES ('<UUID AUS AUTH USERS>');
+
+create table if not exists public.lgt_staff (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  active boolean not null default true,
+  added_at timestamptz not null default now()
+);
+create table if not exists public.lgt_invoices (
+  id uuid primary key default gen_random_uuid(),
+  number text not null unique check (number ~ '^[0-9]{3,10}$'),
+  invoice_date date not null,
+  customer_name text not null check (length(btrim(customer_name)) > 0),
+  customer_number text not null default '',
+  machine text not null default '',
+  original_net_cents bigint not null,
+  original_vat_cents bigint not null,
+  original_total_cents bigint not null,
+  additional_trade_gross_cents bigint not null default 0 check (additional_trade_gross_cents >= 0),
+  trade_discount_net_cents bigint not null default 0 check (trade_discount_net_cents >= 0),
+  net_cents bigint not null,
+  vat_cents bigint not null,
+  total_cents bigint not null,
+  vat_bps integer not null check (vat_bps between 1 and 9999),
+  source_has_trade boolean not null default false,
+  original_pdf_path text not null,
+  issued_pdf_path text not null,
+  files_ready boolean not null default false,
+  created_by uuid not null default auth.uid() references auth.users(id),
+  created_at timestamptz not null default now(),
+  constraint lgt_totals_match check (net_cents + vat_cents = total_cents),
+  constraint lgt_source_totals_match check (original_net_cents + original_vat_cents = original_total_cents),
+  constraint lgt_discount_match check (original_net_cents - trade_discount_net_cents = net_cents),
+  constraint lgt_trade_only_if_not_already check (not source_has_trade or additional_trade_gross_cents = 0)
+);
+create table if not exists public.lgt_claims (
+  id uuid primary key default gen_random_uuid(),
+  invoice_id uuid not null references public.lgt_invoices(id) on delete restrict,
+  supplier text not null default 'Husqvarna',
+  claimed_amount_cents bigint not null check (claimed_amount_cents > 0),
+  received_amount_cents bigint not null default 0 check (received_amount_cents >= 0),
+  status text not null default 'open' check (status in ('open','claimed','partial','paid')),
+  claimed_on date,
+  received_on date,
+  reference text,
+  note text,
+  created_by uuid not null default auth.uid() references auth.users(id),
+  created_at timestamptz not null default now(),
+  unique(invoice_id, supplier),
+  constraint lgt_received_within_claim check (received_amount_cents <= claimed_amount_cents),
+  constraint lgt_paid_full check (status <> 'paid' or received_amount_cents = claimed_amount_cents),
+  constraint lgt_claimed_date check (status = 'open' or claimed_on is not null)
+);
+create table if not exists public.lgt_claim_events (
+  id uuid primary key default gen_random_uuid(),
+  claim_id uuid not null references public.lgt_claims(id) on delete restrict,
+  actor_id uuid not null default auth.uid() references auth.users(id),
+  action text not null check (action in ('claimed','partial','paid','note')),
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+create index if not exists lgt_invoice_date_idx on public.lgt_invoices(invoice_date desc);
+create index if not exists lgt_invoice_customer_idx on public.lgt_invoices(customer_name);
+create index if not exists lgt_claim_status_idx on public.lgt_claims(status);
+create index if not exists lgt_claim_invoice_idx on public.lgt_claims(invoice_id);
+create index if not exists lgt_claim_event_claim_idx on public.lgt_claim_events(claim_id,created_at desc);
+
+alter table public.lgt_staff enable row level security;
+alter table public.lgt_invoices enable row level security;
+alter table public.lgt_claims enable row level security;
+alter table public.lgt_claim_events enable row level security;
+
+-- Keine öffentliche Registrierung/Leseberechtigung. Mitarbeitendenliste nur per Supabase Dashboard pflegen.
+grant select on public.lgt_staff to authenticated;
+grant select, insert, update on public.lgt_invoices to authenticated;
+grant select, insert, update on public.lgt_claims to authenticated;
+grant select, insert on public.lgt_claim_events to authenticated;
+
+create policy "lgt_staff_can_read_self" on public.lgt_staff
+  for select to authenticated using (user_id=(select auth.uid()));
+
+-- LGT-Mitarbeitende sehen firmenweit dieselben Rechnungen (gemeinsame Buchhaltung).
+create policy "lgt_invoice_read" on public.lgt_invoices for select to authenticated
+  using (exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));
+create policy "lgt_invoice_insert" on public.lgt_invoices for insert to authenticated
+  with check (created_by=(select auth.uid()) and exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));
+create policy "lgt_invoice_update_pending" on public.lgt_invoices for update to authenticated
+  using (files_ready=false and exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active))
+  with check (exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));
+
+create policy "lgt_claim_read" on public.lgt_claims for select to authenticated
+  using (exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));
+create policy "lgt_claim_insert" on public.lgt_claims for insert to authenticated
+  with check (created_by=(select auth.uid()) and exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));
+create policy "lgt_claim_update" on public.lgt_claims for update to authenticated
+  using (exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active))
+  with check (exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));
+
+create policy "lgt_events_read" on public.lgt_claim_events for select to authenticated
+  using (exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));
+create policy "lgt_events_insert" on public.lgt_claim_events for insert to authenticated
+  with check (actor_id=(select auth.uid()) and exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));
+
+-- Private Speicherung: keine anonymen Downloads, öffentliche URLs oder Überschreibungen.
+insert into storage.buckets(id,name,public)
+values('lgt-rechnungen','lgt-rechnungen',false)
+on conflict(id) do update set public=false;
+create policy "lgt_pdfs_read" on storage.objects for select to authenticated
+  using(bucket_id='lgt-rechnungen' and exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));
+create policy "lgt_pdfs_upload" on storage.objects for insert to authenticated
+  with check(bucket_id='lgt-rechnungen' and name like 'invoices/%' and exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));

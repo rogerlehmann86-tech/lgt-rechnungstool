@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de-CH">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#142d30">
+  <title>LGT · Rechnungen & Eintauschprämien</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="./config.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brandmark">LGT</div><div><strong>Lehmann Gerätetechnik</strong><small>Rechnungsverwaltung</small></div></div>
+      <nav aria-label="Hauptnavigation">
+        <button class="nav-item active" data-view="dashboard"><span>◫</span> Übersicht</button>
+        <button class="nav-item" data-view="create"><span>⊕</span> Rechnung erstellen</button>
+        <button class="nav-item" data-view="invoices"><span>▤</span> Rechnungsarchiv</button>
+        <button class="nav-item" data-view="claims"><span>◎</span> Husqvarna-Prämien</button>
+      </nav>
+      <div class="side-footer"><span class="status-dot"></span><span id="connection-label">Konfiguration prüfen</span></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div><p class="eyebrow">LGT · Intern</p><h1 id="page-title">Übersicht</h1></div><div class="top-actions"><span id="user-label"></span><button id="logout-btn" class="btn ghost hidden">Abmelden</button><button class="btn primary" data-view="create">+ Neue Rechnung</button></div></header>
+      <div id="banner" class="notice hidden" role="status"></div>
+      <div id="screen" aria-live="polite"></div>
+    </main>
+  </div>
+  <dialog id="dialog"><form method="dialog" id="dialog-form"><h2 id="dialog-title">Bestätigung</h2><div id="dialog-body"></div><div class="dialog-actions"><button class="btn ghost" value="cancel">Abbrechen</button><button class="btn primary" value="confirm" id="dialog-confirm">Bestätigen</button></div></form></dialog>
+</body>
+</html>
