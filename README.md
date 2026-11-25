@@ -67,3 +67,7 @@ python3 -m http.server 8080
 ## Rechnungen aus dem Archiv löschen
 
 Im Rechnungsarchiv auf «Löschen» klicken und die Sicherheitsabfrage bestätigen. Die Rechnung, ihre beiden PDFs, verknüpfte Husqvarna-Prämien und deren Verlauf werden unwiderruflich entfernt. Kundendaten im Werbetool bleiben unverändert. Nach einem Fehler bleibt der Datensatz als zur Löschung markiert im Archiv; «Löschung fortsetzen» wiederholt den Vorgang. Dateien werden ausschliesslich über die Storage API gelöscht, nicht per SQL. Die Buchhaltung im ERP wird dadurch nicht geändert.
+
+## Husqvarna-Prämien nacherfassen
+
+Die PDF-Analyse erkennt auch über mehrere Zeilen umbrochene Prämienbeträge mit «inkl. MwSt.». Bei nicht eindeutig erkannten Beträgen erscheint ein Hinweis. Im Rechnungsarchiv kann bei einer Rechnung ohne Prämie über «Prämie erfassen» eine offene Husqvarna-Forderung nachgetragen werden; die archivierte Rechnung bleibt unverändert.

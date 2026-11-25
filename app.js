@@ -78,7 +78,7 @@ function stats(){const outstanding=claims.reduce((a,c)=>a+Math.max(0,(c.claimed_
 function invoiceTable(items){
   if(!items.length)return empty('Noch keine Rechnungen vorhanden');
   return `<div class="table-scroll"><table><thead><tr><th>Rechnung</th><th>Kunde / Maschine</th><th>Datum</th><th class="right">Total</th><th>Prämie</th><th>PDF / Aktion</th></tr></thead><tbody>${items.map(i=>{
-    const c=claims.find(c=>c.invoice_id===i.id);return `<tr><td><strong>#${esc(i.number)}</strong><small>Rapport ${esc(i.number)}</small></td><td><strong>${esc(i.customer_name)}</strong><small>${esc(i.machine||'—')}</small></td><td>${displayDate(i.invoice_date)}</td><td class="right numeric">${amt(i.total_cents)}</td><td>${c?`<span class="pill ${statusClass(c.status)}">${status(c.status)}</span>`:'—'}</td><td><div class="archive-actions"><button class="text-btn" data-download="${esc(i.id)}" ${i.files_ready&&!i.deletion_pending?'':'disabled title="Dateien unvollständig oder Löschung begonnen"'}>PDF laden</button>${view==='invoices'?'<button class="text-btn delete-invoice" data-delete-invoice="'+esc(i.id)+'">'+(i.deletion_pending?'Löschung fortsetzen':'Löschen')+'</button>':''}</div>${i.deletion_pending?'<small class="deletion-warning">Löschung noch nicht abgeschlossen</small>':''}</td></tr>`;
+    const c=claims.find(c=>c.invoice_id===i.id);return `<tr><td><strong>#${esc(i.number)}</strong><small>Rapport ${esc(i.number)}</small></td><td><strong>${esc(i.customer_name)}</strong><small>${esc(i.machine||'—')}</small></td><td>${displayDate(i.invoice_date)}</td><td class="right numeric">${amt(i.total_cents)}</td><td>${c?`<span class="pill ${statusClass(c.status)}">${status(c.status)}</span>`:view==='invoices'&&i.files_ready&&!i.deletion_pending?`<button class="text-btn" data-add-claim="${esc(i.id)}">Prämie erfassen</button>`:'—'}</td><td><div class="archive-actions"><button class="text-btn" data-download="${esc(i.id)}" ${i.files_ready&&!i.deletion_pending?'':'disabled title="Dateien unvollständig oder Löschung begonnen"'}>PDF laden</button>${view==='invoices'?'<button class="text-btn delete-invoice" data-delete-invoice="'+esc(i.id)+'">'+(i.deletion_pending?'Löschung fortsetzen':'Löschen')+'</button>':''}</div>${i.deletion_pending?'<small class="deletion-warning">Löschung noch nicht abgeschlossen</small>':''}</td></tr>`;
   }).join('')}</tbody></table></div>`;
 }
 function renderDashboard(){
@@ -151,6 +151,7 @@ function createFields(){
   ${analysis.standaloneTrade?`<div class="notice warning">Im ERP ist bereits eine eigenständige <strong>Eintausch</strong>-Position enthalten. Ein zusätzlicher Abzug ist standardmässig gesperrt.</div>`:''}
   <label class="toggle"><input type="checkbox" id="contained" ${analysis.standaloneTrade?'checked':''}><span>Nur Rechnung / Eintausch bereits enthalten (kein zusätzlicher Abzug)</span></label>
   <div class="form-grid"><label>Zusätzlicher Eintausch inkl. MwSt. (CHF)<input id="trade-gross" inputmode="decimal" value="0.00" ${analysis.standaloneTrade?'disabled':''}></label><label>Husqvarna-Prämie (CHF inkl. MwSt.)<input id="premium-gross" inputmode="decimal" value="${(analysis.premiumGross/100).toFixed(2)}"><small>Separater Rückforderungsbetrag, nicht nochmals abziehen</small></label></div>
+  ${analysis.premiumUnresolved?'<div class="notice warning">Eintauschprämie im PDF vorhanden, Bruttobetrag nicht vollständig erkannt. Bitte Prämienbetrag manuell kontrollieren und ergänzen.</div>':analysis.premiumFound?'<p class="helper">Husqvarna-Eintauschprämie automatisch erkannt: '+amt(analysis.premiumGross)+'</p>':''}
   <p class="helper">Artikel, Preise und Rabatte des ERP-Exports bleiben unverändert. Ein zusätzlicher Eintausch wird nur nach erfolgreicher Platz- und Summenprüfung eingefügt.</p>`;
 }
 function formTrade(){if($('#contained')?.checked)return 0;return parseMoney($('#trade-gross')?.value||'0.00');}
@@ -237,15 +238,17 @@ async function saveInvoice(){
   if(a.error||b?.error)throw new Error(`Rechnung #${vals.number} angelegt, aber PDF-Upload unvollständig. Bitte Administrationsprüfung: ${a.error?.message||b?.error?.message}`);
   const ready=await supabase.from('lgt_invoices').update({files_ready:true}).eq('id',id);
   if(ready.error)throw ready.error;
+  let premiumError=null;
   if(vals.premium>0){
     const c=await supabase.from('lgt_claims').insert({invoice_id:id,claimed_amount_cents:vals.premium,
       received_amount_cents:0,status:'open',supplier:'Husqvarna',created_by:user.id});
-    if(c.error)alertBox(`Rechnung gespeichert, Prämienerfassung fehlgeschlagen: ${c.error.message}`,'warning');
+    if(c.error)premiumError=c.error.message;
   }
   downloadPreview();
   analysis=null;sourceBytes=null;resetPreview();
   await reloadRecords();nav('invoices');
-  alertBox(`Rechnung Nr. ${vals.number} erstellt, archiviert und als PDF heruntergeladen.`,'success');
+  if(premiumError)alertBox(`Rechnung Nr. ${vals.number} gespeichert, Prämienerfassung fehlgeschlagen: ${premiumError}. Bitte im Archiv nacherfassen.`,'warning');
+  else alertBox(`Rechnung Nr. ${vals.number} erstellt, archiviert und als PDF heruntergeladen.`,'success');
 }
 async function archivedDownload(id){
   const inv=invoices.find(i=>i.id===id);if(!inv?.files_ready||inv.deletion_pending)throw new Error('PDF ist unvollständig oder zur Löschung markiert.');
@@ -286,6 +289,21 @@ async function ask({title,body,confirm='Speichern'}){
   dialog.showModal();return new Promise(resolve=>{const form=$('#dialog-form');
     const handler=(e)=>{const ok=e.submitter?.value==='confirm';if(ok&&!form.checkValidity()){e.preventDefault();form.reportValidity();return;}
       form.removeEventListener('submit',handler);resolve(ok?Object.fromEntries(new FormData(form).entries()):null);};form.addEventListener('submit',handler);});
+}
+async function addArchivedClaim(id){
+  if(!connected())throw new Error('Keine Berechtigung.');
+  const inv=invoices.find(i=>i.id===id);
+  if(!inv?.files_ready||inv.deletion_pending)throw new Error('Rechnung nicht verfügbar.');
+  const existing=await supabase.from('lgt_claims').select('id').eq('invoice_id',id).eq('supplier','Husqvarna').maybeSingle();
+  if(existing.error)throw existing.error;
+  if(existing.data){await reloadRecords();render();throw new Error('Für diese Rechnung besteht bereits eine Husqvarna-Prämie.');}
+  const value=await ask({title:'Husqvarna-Prämie nacherfassen',confirm:'Offene Prämie speichern',body:`<p>Rechnung Nr. ${esc(inv.number)} – ${esc(inv.customer_name)}. Der Betrag wird separat erfasst, das Rechnungs-PDF bleibt unverändert.</p><label>Prämie inkl. MwSt. (CHF)<input name="premium" inputmode="decimal" required placeholder="150.00"></label>`});
+  if(!value)return;
+  const premium=parseMoney(value.premium);
+  if(premium<=0)throw new Error('Bitte einen positiven Prämienbetrag eingeben.');
+  const r=await supabase.from('lgt_claims').insert({invoice_id:id,claimed_amount_cents:premium,received_amount_cents:0,status:'open',supplier:'Husqvarna',created_by:user.id});
+  if(r.error)throw r.error;
+  await reloadRecords();render();alertBox('Offene Husqvarna-Prämie von '+amt(premium)+' gespeichert.','success');
 }
 async function recordClaim(id,mode){
   const claim=claims.find(c=>c.id===id);if(!claim)throw new Error('Prämie nicht gefunden.');
@@ -330,6 +348,7 @@ document.addEventListener('click',async e=>{
     if(b.id==='save-invoice'){setBusy(b,true,'Wird gespeichert …');try{await saveInvoice();}finally{setBusy(b,false);}return;}
     if(b.dataset.deleteInvoice){setBusy(b,true,'Löschen …');try{await deleteInvoice(b.dataset.deleteInvoice);}finally{setBusy(b,false);}return;}
     if(b.dataset.download){await archivedDownload(b.dataset.download);return;}
+    if(b.dataset.addClaim){await addArchivedClaim(b.dataset.addClaim);return;}
     if(b.dataset.claimRequest){await recordClaim(b.dataset.claimRequest,'requested');return;}
     if(b.dataset.claimPaid){await recordClaim(b.dataset.claimPaid,'paid');return;}
     if(b.dataset.claimHistory){await claimHistory(b.dataset.claimHistory);return;}

@@ -67,6 +67,29 @@ export function originalInvoiceDate(page,title) {
   return !Number.isNaN(date.getTime())&&date.toISOString().slice(0,10)===iso?iso:'';
 }
 
+// ERP descriptions can wrap before "inkl. MwSt.", with numeric article columns in between.
+export function detectPremium(lines){
+  let gross=0, found=0, unresolved=0;
+  for(let i=0;i<lines.length;i++){
+    const line=normalize(lines[i]);
+    const marker=line.match(/\bEintausch\s*prämie\b/i);
+    if(!marker)continue;
+    found++;
+    const tail=line.slice(marker.index+marker[0].length);
+    const next=normalize(lines[i+1]||'');
+    const following=normalize(lines[i+2]||'');
+    const amount=tail.match(/\(\s*(?:CHF\s*|Fr\.\s*)?(\d+(?:[’' ]\d{3})*(?:[.,]\d{2})?)(?:\s*[.,]\s*[-–—])?(?=\s|[)]|$)/i);
+    const ownInclusive=amount && /^\s*inkl\.?\s*(?:MwSt\.?)?/i.test(tail.slice(amount.index+amount[0].length));
+    const nextInclusive=/^inkl\.?(?:\s|$)/i.test(next);
+    const splitAmount= !amount && /^\s*\(\s*$/.test(tail) && next.match(/^(?:CHF\s*|Fr\.\s*)?(\d+(?:[’' ]\d{3})*(?:[.,]\d{2})?)(?:\s*[.,]\s*[-–—])?(?=\s|[)]|$)/i);
+    let value=null;
+    if(amount&&(ownInclusive||nextInclusive))value=amount[1];
+    if(splitAmount&&(/^\s*inkl\.?(?:\s|$)/i.test(next.slice(splitAmount[0].length))||/^inkl\.?(?:\s|$)/i.test(following)))value=splitAmount[1];
+    try{const cents=value===null?0:parseMoney(value);if(cents>0){gross+=cents;}else{unresolved++;}}catch{unresolved++;}
+  }
+  return {gross,found,unresolved};
+}
+
 export async function analyzePdf(bytes) {
   const lib=await getPdfJs();
   const source = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -95,12 +118,10 @@ export async function analyzePdf(bytes) {
     .sort((a,b)=>b.transform[5]-a.transform[5]);
   const customer=normalize(upperRight.find(i=>!/^Sutz[,\s]/i.test(normalize(i.str)))?.str??'');
   const standaloneTrade=allLines.some(s=>/^Eintausch\b(?!prämie)/i.test(s) && !/^Eintauschprämie/i.test(s));
-  const premiumLine=allLines.find(s=>/Eintauschprämie/i.test(s))??'';
-  const grossMatch=premiumLine.match(/\(\s*(\d[\d’' ]*(?:[.,]\d{2})?)\s*[.,-]*\s*inkl\.?/i);
-  let premiumGross=0;
-  if(grossMatch){try {premiumGross=parseMoney(grossMatch[1]);}catch {}}
+  const premium=detectPremium(allLines);
+  const premiumGross=premium.gross;
   return {doc,pages,documentTitle,documentType:documentTitle?.type??'',existingDate,report,customer,customerNo:matchCustomerNo?.[1]??'',machine,
-    summaryIdx,summary,rates,standaloneTrade,premiumGross,rawText:whole,byteLength:source.length};
+    summaryIdx,summary,rates,standaloneTrade,premiumGross,premiumFound:premium.found,premiumUnresolved:premium.unresolved,rawText:whole,byteLength:source.length};
 }
 function putText(ctx,x,y,label,fontSize,color='#161616',align='left') {
   ctx.fillStyle=color; ctx.textAlign=align; ctx.textBaseline='alphabetic';
