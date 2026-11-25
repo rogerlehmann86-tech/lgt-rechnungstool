@@ -31,8 +31,8 @@ create table if not exists public.lgt_invoices (
   files_ready boolean not null default false,
   created_by uuid not null default auth.uid() references auth.users(id),
   created_at timestamptz not null default now(),
-  constraint lgt_totals_match check (net_cents + vat_cents = total_cents),
-  constraint lgt_source_totals_match check (original_net_cents + original_vat_cents = original_total_cents),
+  constraint lgt_totals_match check (net_cents + vat_cents = total_cents or (additional_trade_gross_cents=0 and net_cents=original_net_cents and vat_cents=original_vat_cents and total_cents=original_total_cents and abs(total_cents-net_cents-vat_cents)<=5)),
+  constraint lgt_source_totals_match check (abs(original_total_cents-original_net_cents-original_vat_cents)<=5),
   constraint lgt_discount_match check (original_net_cents - trade_discount_net_cents = net_cents),
   constraint lgt_trade_only_if_not_already check (not source_has_trade or additional_trade_gross_cents = 0)
 );

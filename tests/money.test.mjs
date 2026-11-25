@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseMoney,formatMoney,parseVatBps,roundDivide,recalculate,chDate} from '../money.js';
+import {parseMoney,formatMoney,parseVatBps,roundDivide,recalculate,chDate,sourceRoundingAllowed} from '../money.js';
 
 test('Schweizer Beträge werden rappen-genau geparst',()=>{
   assert.equal(parseMoney('1’193.34'),119334);
@@ -27,4 +27,14 @@ test('CHF 350 Eintausch meldet 1 Rappen Rundungsdifferenz bei Beispielrechnung',
 test('Negatives Original und Datumsformat',()=>{
   const r=recalculate({originalNet:-31565,originalVat:-2557,originalTotal:-34122,tradeGross:0,vatBps:810});
   assert.equal(r.total,-34122);assert.equal(chDate('2026-11-25'),'25.11.2026');
+});
+test('ERP-Rundung von fünf Rappen bleibt bei Nur Rechnung unverändert und ist zulässig',()=>{
+  const r=recalculate({originalNet:10000,originalVat:810,originalTotal:10815,tradeGross:0,vatBps:810});
+  assert.equal(r.net,10000);assert.equal(r.vat,810);assert.equal(r.total,10815);assert.equal(r.sourceDifference,5);assert.equal(sourceRoundingAllowed(r),true);
+  assert.equal(sourceRoundingAllowed({...r,sourceDifference:-5}),true);
+  assert.equal(sourceRoundingAllowed({...r,sourceDifference:6}),false);
+});
+test('Eintausch mit ERP-Rundung berechnet neue konsistente Summen',()=>{
+  const r=recalculate({originalNet:10000,originalVat:810,originalTotal:10815,tradeGross:1000,vatBps:810});
+  assert.equal(sourceRoundingAllowed(r),true);assert.equal(r.net+r.vat,r.total);assert.equal(r.sourceDifference,5);
 });

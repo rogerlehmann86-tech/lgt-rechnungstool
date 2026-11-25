@@ -14,7 +14,7 @@ Interne Web-Anwendung der **Lehmann Gerätetechnik GmbH** zur Umwandlung von ERP
 - **Husqvarna-Herstellerprämie getrennt** vom Kunden-Eintausch verfolgen; Beträge, Antragsdatum, Referenz, Teil-/Vollzahlung.
 - **Archiv**: Rechnungsnummer einmalig, Kunden-/Maschineninformationen, Original- und End-PDF in privatem Storage.
 - **Sicherheitsmodell**: E-Mail/Passwort über Supabase Auth, manuell freigeschaltete LGT-Mitarbeitende, RLS, private PDFs. Keine Service-Role-Schlüssel im Browser.
-- **Prüfpflicht**: Visuelle Kontrolle jeder erstellten Rechnung vor der Speicherung. Bei abweichender Rundung oder widersprüchlichen Originalwerten wird eine Warnung angezeigt bzw. die Ausgabe gesperrt.
+- **Prüfpflicht**: Visuelle Kontrolle jeder erstellten Rechnung vor der Speicherung. Rundungsdifferenzen beim Eintausch sind Hinweise ohne zusätzliche Bestätigung. ERP-Originalsummen bis CHF 0.05 Abweichung werden unverändert akzeptiert; grössere Widersprüche bleiben gesperrt.
 
 ## Technischer Aufbau
 
@@ -22,7 +22,7 @@ Statische Website (`index.html`, `style.css`, `app.js`, `invoice.js`, `money.js`
 
 ## Supabase-Anbindung
 
-Das bestehende Supabase-Projekt «Lehmann Werbetool» ist angebunden. Die vier neuen `lgt_*`-Tabellen und der private Storage-Bucket `lgt-rechnungen` wurden eingerichtet. Die vorhandene Kundentabelle `contacts` bleibt unverändert; die ERP-Kundennummer wird mit `contacts.id` abgeglichen. Rechnungsdaten und PDF bleiben als historische Momentaufnahme erhalten. Die logische Referenz ohne Fremdschlüssel verhindert, dass Kundenimporte durch die Rechnungsablage blockiert werden.
+Das bestehende Supabase-Projekt «Lehmann Werbetool» ist angebunden. Die vier neuen `lgt_*`-Tabellen und der private Storage-Bucket `lgt-rechnungen` wurden eingerichtet. Die vorhandene Kundentabelle `contacts` bleibt unverändert; die ERP-Kundennummer wird mit `contacts.id` abgeglichen und der Kundenname (Firma bzw. Vor- und Nachname) automatisch ins Formular übernommen. Der Name bleibt manuell korrigierbar. Das PDF behält die ERP-Kundenangaben. Rechnungsdaten und PDF bleiben als historische Momentaufnahme erhalten. Die logische Referenz ohne Fremdschlüssel verhindert, dass Kundenimporte durch die Rechnungsablage blockiert werden.
 
 Das bestehende bestätigte Werbetool-Konto wurde für das Rechnungstool freigeschaltet. Weitere Rechnungstool-Berechtigungen werden ausschliesslich vom Administrator vergeben. Achtung: Bestehende Werbetool-Richtlinien erlauben angemeldeten Benutzern breiten Zugriff auf Werbedaten. Keine weiteren Auth-Benutzer anlegen, bevor diese Berechtigungen geprüft und die öffentliche Registrierung deaktiviert ist.
 
@@ -61,6 +61,6 @@ python3 -m http.server 8080
 ## Weitere Schritte vor Produktivbetrieb
 
 - PDF-Layout mit mindestens drei unterschiedlichen realen ERP-Rechnungen testen (1 / 2 / 3 Seiten, mit und ohne Eintausch). Original-/End-PDF visuell vergleichen, Preis- und Positionstext zeilenweise überprüfen.
-- Rundungsdifferenzen von CHF 0.01 mit Buchhaltung abstimmen; nicht automatisch als exakt verbucht ausgeben.
+- Rundungsdifferenzen werden in der Kontrollübersicht ausgewiesen; kein zusätzlicher Bestätigungsschritt für Eintauschrundung.
 - Datensicherung, Aufbewahrungsfristen, Zugriffskontrolle und Wiederherstellbarkeit definieren.
 - Transaktionssichere Statushistorie/Fehlerbehebung für unvollständige Dateien ergänzen.

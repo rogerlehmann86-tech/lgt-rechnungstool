@@ -1,9 +1,10 @@
-import { swissDate, chDate, parseMoney, formatMoney, recalculate } from './money.js';
+import { swissDate, chDate, parseMoney, formatMoney, recalculate, sourceRoundingAllowed } from './money.js';
 import { analyzePdf, renderInvoicePdf, invoiceFilename } from './invoice.js';
 
 const cfg=window.LGT_CONFIG||{};
 let supabase=null, user=null, authorized=false, invoices=[],claims=[];
 let view='dashboard', analysis=null, sourceBytes=null, issued=null, pdfUrl=null;
+let customerLookup=Promise.resolve(), customerRequest=0;
 const $=s=>document.querySelector(s);
 const screen=$('#screen');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -107,24 +108,43 @@ function renderCreate(){
     <div id="calc-panel">${analyzed?renderCalculation():`<div class="preview-placeholder">PDF-Vorschau erscheint hier.</div>`}</div>
     <div id="pdf-viewer">${issued?`<iframe title="Rechnungsvorschau" src="${pdfUrl}"></iframe>`:''}</div>
     <div class="action-stack" id="generate-actions">${analyzed?generateActions():''}</div></div></div>`;
-  if(analyzed)void checkCustomer();
+  if(analyzed)refreshCustomer();
+}
+function refreshCustomer(){
+  customerLookup=checkCustomer().catch(error=>{
+    const target=$('#customer-match');
+    if(target)target.textContent='Kundenabgleich nicht verfügbar. Name bitte anhand des ERP-PDFs prüfen.';
+    console.error(error);
+  });
 }
 async function checkCustomer(){
-  const target=$('#customer-match'), field=$('#customer-number');
-  if(!target||!field||!connected())return;
-  const number=field.value.trim();
+  const target=$('#customer-match'), field=$('#customer-number'), name=$('#customer-name');
+  if(!target||!field||!name||!connected())return;
+  const request=++customerRequest, number=field.value.trim();
+  // Nach Änderung der Kundennummer keine alte automatisch übernommene Person stehen lassen.
+  if(name.dataset.customerNumber && name.dataset.customerNumber!==number && name.value===name.dataset.customerValue){
+    name.value=number===String(analysis?.customerNo||'').trim()?String(analysis?.customer||''):'';
+  }
+  const before=name.value;
   if(!/^\d{1,18}$/.test(number)){target.textContent="Keine gültige ERP-Kundennummer für den Stammabgleich.";return;}
   target.textContent="Kundenstamm wird geprüft …";
   const {data,error}=await supabase.from("contacts").select("id,company,firstname,lastname,zip,city").eq("id",number).maybeSingle();
-  if(!target.isConnected||field.value.trim()!==number)return;
+  if(request!==customerRequest||!target.isConnected||field.value.trim()!==number)return;
   if(error){target.textContent="Kundenabgleich nicht verfügbar: "+error.message;return;}
-  if(!data){target.textContent="Kundennummer im Werbetool nicht gefunden. Rechnung kann mit den ERP-Daten gespeichert werden.";return;}
-  target.textContent="Kundenstamm: "+[data.company,[data.firstname,data.lastname].filter(Boolean).join(" "),[data.zip,data.city].filter(Boolean).join(" ")].filter(Boolean).join(" · ")+" (bitte mit PDF vergleichen)";
+  if(!data){target.textContent="Kundennummer im Werbetool nicht gefunden. Name bitte anhand des ERP-PDFs prüfen.";return;}
+  const person=[data.firstname,data.lastname].map(v=>String(v||'').trim()).filter(Boolean).join(" ");
+  const fullName=String(data.company||'').trim()||person;
+  if(fullName && name.value===before){
+    if(name.value!==fullName){name.value=fullName;resetPreview();}
+    name.dataset.customerNumber=number;
+    name.dataset.customerValue=fullName;
+  }
+  target.textContent="Kundenstamm: "+[fullName,[data.zip,data.city].filter(Boolean).join(" ")].filter(Boolean).join(" · ")+(fullName?" (Name automatisch übernommen, sofern nicht manuell geändert)":" (kein Name hinterlegt)");
 }
 function createFields(){
   const s=analysis.summary;
   return `<div class="divider"></div><div class="form-grid"><label>Rechnungsnummer (= Rapport)<input id="invoice-number" value="${esc(analysis.report)}" readonly></label><label>Rechnungsdatum<input id="invoice-date" type="date" value="${swissDate()}" required></label>
-    <label class="full">Kundenname <small>(bitte prüfen)</small><input id="customer-name" value="${esc(analysis.customer)}" placeholder="Vorname Nachname" required></label>
+    <label class="full">Kundenname <small>(aus Kundenstamm, bei Bedarf korrigieren)</small><input id="customer-name" value="${esc(analysis.customer)}" placeholder="Vorname Nachname" required></label>
     <label>Kundennummer<input id="customer-number" value="${esc(analysis.customerNo)}"></label><label>Mehrwertsteuer<input value="${s?(s.vatBps/100).toFixed(2)+'%':'Nicht erkannt'}" disabled></label>
     <div class="full helper" id="customer-match" aria-live="polite"></div><label class="full">Maschine<input id="machine" value="${esc(analysis.machine)}"></label>
   </div><div class="divider"></div><h3>Eintausch und Herstellerprämie</h3>
@@ -144,8 +164,8 @@ function renderCalculation(){
   if(!analysis.summary)return `<div class="notice error">Summen des ERP-PDFs nicht erkannt. Keine automatische Freigabe möglich.</div>`;
   let calc;try{calc=getCalculation();}catch(error){return `<div class="notice warning">${esc(error.message)}</div>`;}
   return `<div class="calculation"><div><span>Ursprüngliches Total</span><strong>${amt(analysis.summary.originalTotal)}</strong></div><div><span>Zusätzlicher Eintausch brutto</span><strong>${amt(calc.tradeGross)}</strong></div><div><span>Neue Nettosumme</span><strong>${amt(calc.net)}</strong></div><div><span>MwSt ${(analysis.summary.vatBps/100).toFixed(2)}%</span><strong>${amt(calc.vat)}</strong></div><div class="grand"><span>Definitives Total</span><strong>${amt(calc.total)}</strong></div></div>
-    ${calc.sourceDifference!==0?`<div class="notice warning">Originalwerte weichen um ${amt(calc.sourceDifference)} voneinander ab. PDF-Ausgabe gesperrt.</div>`:''}
-    ${calc.roundingDifference!==0?`<div class="notice warning">Rundungsdifferenz: Die rechnerische Bruttopreisminderung weicht um ${amt(calc.roundingDifference)} vom gewünschten Eintausch ab. Bitte prüfen und bei Abweichung von höchstens CHF 0.01 ausdrücklich bestätigen.</div>`:''}`;
+    ${calc.sourceDifference!==0?`<div class="notice warning">Originalwerte weichen um ${amt(calc.sourceDifference)} voneinander ab. ${sourceRoundingAllowed(calc)?"ERP-Rundung akzeptiert.":"Abweichung über CHF 0.05 – Originalsummen prüfen."}</div>`:''}
+    ${calc.roundingDifference!==0?`<div class="notice warning">Rundungsdifferenz: Die rechnerische Bruttopreisminderung weicht um ${amt(calc.roundingDifference)} vom gewünschten Eintausch ab. Nur zur Information – Export und Speicherung sind möglich.</div>`:''}`;
 }
 function generateActions(){return `<button class="btn secondary full-width" id="make-preview">PDF-Vorschau erstellen</button>
   ${issued?`<label class="toggle"><input id="checked-preview" type="checkbox"><span>Ich habe Datum, Positionen, Seiten und Total visuell geprüft.</span></label><div class="button-row"><button class="btn ghost" id="download-preview">PDF herunterladen</button><button class="btn primary" id="save-invoice" ${connected()?'':'disabled title="Supabase-Verbindung erforderlich"'}>Rechnung definitiv speichern</button></div>`:''}`;}
@@ -170,10 +190,11 @@ function getCreateValues(){
   if(!customer)throw new Error('Bitte Kundenname prüfen und ergänzen.');
   if(!/^\d{4}-\d\d-\d\d$/.test(date)||Number.isNaN(new Date(date+'T12:00:00').getTime()))throw new Error('Rechnungsdatum fehlt oder ist ungültig.');
   if(premium<0)throw new Error('Prämienbetrag darf nicht negativ sein.');
-  if(Math.abs(calc.roundingDifference)>1||calc.sourceDifference!==0)throw new Error('Rechenprüfung nicht bestanden; PDF-Ausgabe gesperrt.');
+  if(!sourceRoundingAllowed(calc))throw new Error('Originalsummen weichen um mehr als CHF 0.05 ab. Bitte ERP-Export prüfen.');
   return {number,customer,date,customerNo,machine,premium,calc};
 }
 async function makePreview(){
+  await customerLookup;
   const vals=getCreateValues();
   const button=$('#make-preview');setBusy(button,true,'PDF wird geprüft …');
   try{
@@ -192,7 +213,6 @@ async function saveInvoice(){
   if(!connected())throw new Error('Bitte zuerst die geschützte Datenbank einrichten.');
   if(!issued)throw new Error('PDF-Vorschau fehlt.');
   if(!$('#checked-preview')?.checked)throw new Error('Bitte die visuelle Prüfung bestätigen.');
-  if(issued.vals.calc.roundingDifference!==0&&!$('#checked-rounding')?.checked)throw new Error('Bitte die Rundungsdifferenz ausdrücklich bestätigen.');
   // Eingaben dürfen nach Vorschau nicht unbemerkt geändert werden.
   const vals=getCreateValues();
   if(JSON.stringify(vals)!==JSON.stringify(issued.vals))throw new Error('Angaben wurden nach der PDF-Vorschau geändert. Bitte neue Vorschau erstellen.');
@@ -294,7 +314,7 @@ document.addEventListener('change',async e=>{
   if(e.target.id==='pdf-file'){try{await loadFile(e.target.files[0]);}catch(error){alertBox(error.message,'error');}return;}
   if(e.target.id==='contained'){const trade=$('#trade-gross');trade.disabled=e.target.checked;if(e.target.checked)trade.value='0.00';resetPreview();$('#calc-panel').innerHTML=renderCalculation();return;}
   if(['invoice-date','trade-gross','customer-name','customer-number','machine','premium-gross'].includes(e.target.id)){
-    resetPreview();if(analysis)$('#calc-panel').innerHTML=renderCalculation();if(e.target.id==='customer-number')void checkCustomer();return;
+    resetPreview();if(analysis)$('#calc-panel').innerHTML=renderCalculation();if(e.target.id==='customer-number')refreshCustomer();return;
   }
   if(e.target.id==='claim-filter'){$('#claim-results').innerHTML=claimTable(e.target.value==='all'?claims:claims.filter(c=>c.status===e.target.value));}
 });

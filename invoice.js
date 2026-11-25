@@ -1,4 +1,4 @@
-import { parseMoney, parseVatBps, recalculate, formatMoney, chDate } from './money.js';
+import { parseMoney, parseVatBps, recalculate, formatMoney, chDate, sourceRoundingAllowed } from './money.js';
 const PDFJS_VERSION = '6.5.438';
 let pdfjs;
 async function getPdfJs() {
@@ -142,8 +142,7 @@ export async function renderInvoicePdf(analysis,opts) {
   if (opts.tradeGross>0 && analysis.standaloneTrade && !opts.confirmExtra) throw new Error('Eine eigenständige Eintauschposition ist bereits vorhanden. Es wird kein weiterer Abzug eingefügt.');
   if(opts.tradeGross>0 && analysis.rates.length>1) throw new Error('Mehrere MwSt-Sätze gefunden: Eintausch muss steuerlich manuell zugeordnet werden.');
   const calc=recalculate({...analysis.summary,tradeGross:opts.tradeGross,vatBps:analysis.summary.vatBps});
-  if(Math.abs(calc.roundingDifference)>1) throw new Error(`Rundungsdifferenz beim Eintausch (${formatMoney(calc.roundingDifference)}) ist zu hoch. PDF-Ausgabe gesperrt.`);
-  if(calc.sourceDifference!==0) throw new Error(`Originalsummen sind um ${formatMoney(calc.sourceDifference)} widersprüchlich. PDF-Ausgabe gesperrt.`);
+  if(!sourceRoundingAllowed(calc)) throw new Error(`Originalsummen weichen um ${formatMoney(calc.sourceDifference)} ab (über CHF 0.05). Bitte ERP-Export prüfen.`);
   const doc=await PDFDocument.create();
   for(let i=0;i<analysis.pages.length;i++){
     const p=analysis.pages[i],scale=3.5; // ca. 252 dpi; Originalseiten bleiben im Erscheinungsbild erhalten.
@@ -156,7 +155,7 @@ export async function renderInvoicePdf(analysis,opts) {
       const idx=analysis.summaryIdx>0?analysis.summaryIdx-1:analysis.summaryIdx;
       if(i===idx) paintTradeRow(ctx,analysis,scale,calc.discountNet);
     }
-    if(i===analysis.summaryIdx) paintSummary(ctx,analysis,scale,{...calc,vatBps:analysis.summary.vatBps});
+    if(opts.tradeGross>0 && i===analysis.summaryIdx) paintSummary(ctx,analysis,scale,{...calc,vatBps:analysis.summary.vatBps});
     const blob=await new Promise((resolve,reject)=>canvas.toBlob(x=>x?resolve(x):reject(new Error('PNG-Export fehlgeschlagen.')),'image/png'));
     const data=await blob.arrayBuffer();
     const img=await doc.embedPng(data); const out=doc.addPage([p.width,p.height]);out.drawImage(img,{x:0,y:0,width:p.width,height:p.height});

@@ -52,3 +52,6 @@ export function swissDate(date = new Date()) {
   return `${obj.year}-${obj.month}-${obj.day}`;
 }
 export function chDate(iso) { const m=String(iso??'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}.${m[2]}.${m[1]}` : ''; }
+// ERP kann das Bruttototal auf 5 Rappen runden. Grössere Abweichungen sind keine übliche Rundung.
+export const ERP_ROUNDING_TOLERANCE = 5;
+export function sourceRoundingAllowed(calc) { return Math.abs(calc.sourceDifference) <= ERP_ROUNDING_TOLERANCE; }
