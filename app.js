@@ -77,8 +77,8 @@ function stats(){const outstanding=claims.reduce((a,c)=>a+Math.max(0,(c.claimed_
   return [{n:invoices.length,l:'Erstellte Rechnungen',s:'Im Archiv erfasst'},{n:claims.filter(c=>c.status==='open').length,l:'Offene Prämien',s:'Noch nicht eingefordert'},{n:amt(outstanding),l:'Ausstehender Betrag',s:'Husqvarna-Rückvergütungen'},{n:claims.filter(c=>c.status==='paid').length,l:'Erhaltene Prämien',s:'Abgeschlossene Fälle'}];}
 function invoiceTable(items){
   if(!items.length)return empty('Noch keine Rechnungen vorhanden');
-  return `<div class="table-scroll"><table><thead><tr><th>Rechnung</th><th>Kunde / Maschine</th><th>Datum</th><th class="right">Total</th><th>Prämie</th><th>PDF</th></tr></thead><tbody>${items.map(i=>{
-    const c=claims.find(c=>c.invoice_id===i.id);return `<tr><td><strong>#${esc(i.number)}</strong><small>Rapport ${esc(i.number)}</small></td><td><strong>${esc(i.customer_name)}</strong><small>${esc(i.machine||'—')}</small></td><td>${displayDate(i.invoice_date)}</td><td class="right numeric">${amt(i.total_cents)}</td><td>${c?`<span class="pill ${statusClass(c.status)}">${status(c.status)}</span>`:'—'}</td><td><button class="text-btn" data-download="${esc(i.id)}" ${i.files_ready?'':'disabled title="Dateien unvollständig"'}>PDF laden</button></td></tr>`;
+  return `<div class="table-scroll"><table><thead><tr><th>Rechnung</th><th>Kunde / Maschine</th><th>Datum</th><th class="right">Total</th><th>Prämie</th><th>PDF / Aktion</th></tr></thead><tbody>${items.map(i=>{
+    const c=claims.find(c=>c.invoice_id===i.id);return `<tr><td><strong>#${esc(i.number)}</strong><small>Rapport ${esc(i.number)}</small></td><td><strong>${esc(i.customer_name)}</strong><small>${esc(i.machine||'—')}</small></td><td>${displayDate(i.invoice_date)}</td><td class="right numeric">${amt(i.total_cents)}</td><td>${c?`<span class="pill ${statusClass(c.status)}">${status(c.status)}</span>`:'—'}</td><td><div class="archive-actions"><button class="text-btn" data-download="${esc(i.id)}" ${i.files_ready&&!i.deletion_pending?'':'disabled title="Dateien unvollständig oder Löschung begonnen"'}>PDF laden</button>${view==='invoices'?'<button class="text-btn delete-invoice" data-delete-invoice="'+esc(i.id)+'">'+(i.deletion_pending?'Löschung fortsetzen':'Löschen')+'</button>':''}</div>${i.deletion_pending?'<small class="deletion-warning">Löschung noch nicht abgeschlossen</small>':''}</td></tr>`;
   }).join('')}</tbody></table></div>`;
 }
 function renderDashboard(){
@@ -248,9 +248,38 @@ async function saveInvoice(){
   alertBox(`Rechnung Nr. ${vals.number} erstellt, archiviert und als PDF heruntergeladen.`,'success');
 }
 async function archivedDownload(id){
-  const inv=invoices.find(i=>i.id===id);if(!inv?.files_ready)throw new Error('PDF ist noch nicht vollständig gespeichert.');
+  const inv=invoices.find(i=>i.id===id);if(!inv?.files_ready||inv.deletion_pending)throw new Error('PDF ist unvollständig oder zur Löschung markiert.');
   const r=await supabase.storage.from('lgt-rechnungen').download(inv.issued_pdf_path);
   if(r.error)throw r.error;downloadBlob(r.data,invoiceFilename(inv.number,inv.customer_name));
+}
+async function deleteInvoice(id){
+  if(!connected())throw new Error('Keine Berechtigung zum Löschen.');
+  const {data:inv,error:loadError}=await supabase.from('lgt_invoices').select('*').eq('id',id).maybeSingle();
+  if(loadError)throw loadError;
+  if(!inv)throw new Error('Rechnung nicht gefunden.');
+  const {data:linked,error:claimError}=await supabase.from('lgt_claims').select('status,claimed_amount_cents,received_amount_cents').eq('invoice_id',id);
+  if(claimError)throw claimError;
+  const details=(linked||[]).map(c=>status(c.status)+': '+amt(c.claimed_amount_cents)+' (erhalten: '+amt(c.received_amount_cents||0)+')').join('\n');
+  const prefix='invoices/'+id+'/';
+  const paths=[...new Set([inv.original_pdf_path,inv.issued_pdf_path])];
+  if(paths.some(p=>typeof p!=='string'||!p.startsWith(prefix)))throw new Error('PDF-Pfade passen nicht zur Rechnung. Bitte Administrator kontaktieren.');
+  const confirmed=window.confirm('Rechnung Nr. '+inv.number+' – '+inv.customer_name+' endgültig löschen?\n\nOriginal- und Rechnungs-PDF sowie alle verknüpften Prämien und deren Verlauf werden gelöscht.'+(details?'\n\nHusqvarna-Prämien:\n'+details:'')+'\n\nDie Löschung kann nicht rückgängig gemacht werden. Bereits verbuchte Rechnungen müssen separat in der Buchhaltung korrigiert werden.');
+  if(!confirmed)return;
+  try{
+    const mark=await supabase.from('lgt_invoices').update({deletion_pending:true}).eq('id',id).select('id').maybeSingle();
+    if(mark.error)throw mark.error;
+    if(!mark.data)throw new Error('Rechnung konnte nicht zur Löschung markiert werden.');
+    const removal=await supabase.storage.from('lgt-rechnungen').remove(paths);
+    if(removal.error)throw removal.error;
+    const result=await supabase.from('lgt_invoices').delete().eq('id',id).eq('deletion_pending',true).select('id').maybeSingle();
+    if(result.error)throw result.error;
+    if(!result.data)throw new Error('Rechnung konnte noch nicht vollständig gelöscht werden. Bitte Löschung fortsetzen.');
+  }catch(error){
+    await reloadRecords();render();
+    throw new Error('Löschung nicht abgeschlossen: '+(error.message||String(error))+' – bitte im Archiv erneut versuchen.');
+  }
+  await reloadRecords();render();
+  alertBox('Rechnung Nr. '+inv.number+' inklusive PDFs und verknüpfter Prämien gelöscht.','success');
 }
 async function ask({title,body,confirm='Speichern'}){
   const dialog=$('#dialog');$('#dialog-title').textContent=title;$('#dialog-body').innerHTML=body;$('#dialog-confirm').textContent=confirm;
@@ -260,6 +289,7 @@ async function ask({title,body,confirm='Speichern'}){
 }
 async function recordClaim(id,mode){
   const claim=claims.find(c=>c.id===id);if(!claim)throw new Error('Prämie nicht gefunden.');
+  if(invoices.find(i=>i.id===claim.invoice_id)?.deletion_pending)throw new Error('Die zugehörige Rechnung ist zur Löschung markiert.');
   if(mode==='requested'){
     const val=await ask({title:'Einforderung bei Husqvarna',confirm:'Einforderung dokumentieren',body:`<p>Ab jetzt ist dieser Betrag als bei Husqvarna eingefordert gekennzeichnet.</p><label>Datum der Einforderung<input type="date" name="date" value="${swissDate()}" required></label><label>Referenz / Bemerkung<input name="reference" placeholder="Husqvarna-Antragsnummer (optional)"></label>`});
     if(!val)return;
@@ -298,6 +328,7 @@ document.addEventListener('click',async e=>{
     if(b.id==='make-preview'){await makePreview();return;}
     if(b.id==='download-preview'){downloadPreview();return;}
     if(b.id==='save-invoice'){setBusy(b,true,'Wird gespeichert …');try{await saveInvoice();}finally{setBusy(b,false);}return;}
+    if(b.dataset.deleteInvoice){setBusy(b,true,'Löschen …');try{await deleteInvoice(b.dataset.deleteInvoice);}finally{setBusy(b,false);}return;}
     if(b.dataset.download){await archivedDownload(b.dataset.download);return;}
     if(b.dataset.claimRequest){await recordClaim(b.dataset.claimRequest,'requested');return;}
     if(b.dataset.claimPaid){await recordClaim(b.dataset.claimPaid,'paid');return;}

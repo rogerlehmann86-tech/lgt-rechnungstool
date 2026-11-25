@@ -127,3 +127,37 @@ begin
 end; $$;
 revoke all on function public.lgt_link_contact() from public, anon, authenticated;
 create trigger lgt_link_contact_before_insert before insert on public.lgt_invoices for each row execute function public.lgt_link_contact();
+
+
+-- Two-phase deletion: mark first, remove PDFs through Storage API, then delete invoice and dependent records.
+alter table public.lgt_invoices add column deletion_pending boolean not null default false;
+alter table public.lgt_claims drop constraint lgt_claims_invoice_id_fkey, add constraint lgt_claims_invoice_id_fkey foreign key(invoice_id) references public.lgt_invoices(id) on delete cascade;
+alter table public.lgt_claim_events drop constraint lgt_claim_events_claim_id_fkey, add constraint lgt_claim_events_claim_id_fkey foreign key(claim_id) references public.lgt_claims(id) on delete cascade;
+grant update(deletion_pending) on public.lgt_invoices to authenticated;
+grant delete on public.lgt_invoices to authenticated;
+alter policy lgt_invoice_update_pending on public.lgt_invoices
+using (exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active))
+with check (exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));
+create function public.lgt_guard_invoice_update() returns trigger language plpgsql security invoker set search_path='' as $$
+begin
+  if (old.files_ready or old.deletion_pending or new.deletion_pending) and new.files_ready is distinct from old.files_ready then
+    raise exception 'Finalisierte oder zur Löschung markierte Rechnung darf nicht geändert werden.';
+  end if;
+  if old.deletion_pending and not new.deletion_pending then
+    raise exception 'Begonnene Löschung muss abgeschlossen werden.';
+  end if;
+  return new;
+end; $$;
+revoke all on function public.lgt_guard_invoice_update() from public, anon, authenticated;
+create trigger lgt_guard_invoice_update before update on public.lgt_invoices for each row execute function public.lgt_guard_invoice_update();
+create policy lgt_invoice_delete on public.lgt_invoices for delete to authenticated
+using (deletion_pending and exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active)
+  and not exists(select 1 from storage.objects o where o.bucket_id='lgt-rechnungen' and o.name in (lgt_invoices.original_pdf_path,lgt_invoices.issued_pdf_path)));
+create policy lgt_pdfs_delete on storage.objects for delete to authenticated
+using (bucket_id='lgt-rechnungen' and exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active)
+  and exists(select 1 from public.lgt_invoices i where i.deletion_pending and storage.objects.name in (i.original_pdf_path,i.issued_pdf_path)
+  and storage.objects.name like 'invoices/'||i.id::text||'/%'));
+alter policy lgt_pdfs_upload on storage.objects
+with check (bucket_id='lgt-rechnungen' and exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active)
+ and exists(select 1 from public.lgt_invoices i where not i.deletion_pending and not i.files_ready and storage.objects.name in (i.original_pdf_path,i.issued_pdf_path)
+ and storage.objects.name like 'invoices/'||i.id::text||'/%'));

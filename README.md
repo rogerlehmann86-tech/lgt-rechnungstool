@@ -64,3 +64,6 @@ python3 -m http.server 8080
 - Rundungsdifferenzen werden in der Kontrollübersicht ausgewiesen; kein zusätzlicher Bestätigungsschritt für Eintauschrundung.
 - Datensicherung, Aufbewahrungsfristen, Zugriffskontrolle und Wiederherstellbarkeit definieren.
 - Transaktionssichere Statushistorie/Fehlerbehebung für unvollständige Dateien ergänzen.
+## Rechnungen aus dem Archiv löschen
+
+Im Rechnungsarchiv auf «Löschen» klicken und die Sicherheitsabfrage bestätigen. Die Rechnung, ihre beiden PDFs, verknüpfte Husqvarna-Prämien und deren Verlauf werden unwiderruflich entfernt. Kundendaten im Werbetool bleiben unverändert. Nach einem Fehler bleibt der Datensatz als zur Löschung markiert im Archiv; «Löschung fortsetzen» wiederholt den Vorgang. Dateien werden ausschliesslich über die Storage API gelöscht, nicht per SQL. Die Buchhaltung im ERP wird dadurch nicht geändert.
