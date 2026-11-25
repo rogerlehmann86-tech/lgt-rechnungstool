@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseMoney,formatMoney,parseVatBps,roundDivide,recalculate,chDate,sourceRoundingAllowed} from '../money.js';
+import {parseMoney,formatMoney,parseVatBps,roundDivide,recalculate,chDate,sourceRoundingAllowed,husqvarnaRefund} from '../money.js';
 
 test('Schweizer Beträge werden rappen-genau geparst',()=>{
   assert.equal(parseMoney('1’193.34'),119334);
@@ -37,4 +37,12 @@ test('ERP-Rundung von fünf Rappen bleibt bei Nur Rechnung unverändert und ist 
 test('Eintausch mit ERP-Rundung berechnet neue konsistente Summen',()=>{
   const r=recalculate({originalNet:10000,originalVat:810,originalTotal:10815,tradeGross:1000,vatBps:810});
   assert.equal(sourceRoundingAllowed(r),true);assert.equal(r.net+r.vat,r.total);assert.equal(r.sourceDifference,5);
+});
+
+// 50 % der Kundenprämie, kaufmännisch auf Rappen gerundet.
+test('Husqvarna refunds half of the gross customer premium',()=>{
+ assert.equal(husqvarnaRefund(15000),7500);
+ assert.equal(husqvarnaRefund(30000),15000);
+ assert.equal(husqvarnaRefund(15001),7501);
+ assert.equal(husqvarnaRefund(0),0);
 });

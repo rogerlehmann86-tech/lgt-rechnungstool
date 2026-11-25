@@ -161,3 +161,15 @@ alter policy lgt_pdfs_upload on storage.objects
 with check (bucket_id='lgt-rechnungen' and exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active)
  and exists(select 1 from public.lgt_invoices i where not i.deletion_pending and not i.files_ready and storage.objects.name in (i.original_pdf_path,i.issued_pdf_path)
  and storage.objects.name like 'invoices/'||i.id::text||'/%'));
+
+-- Husqvarna refunds exactly half of the gross customer trade-in premium.
+alter table public.lgt_claims add column customer_premium_gross_cents bigint;
+do $$
+begin
+  if exists(select 1 from public.lgt_claims where supplier='Husqvarna' and received_amount_cents > round(claimed_amount_cents::numeric/2)) then
+    raise exception 'Existing payment exceeds corrected entitlement; manual review required.';
+  end if;
+end $$;
+update public.lgt_claims set customer_premium_gross_cents=claimed_amount_cents,claimed_amount_cents=round(claimed_amount_cents::numeric/2)::bigint,status=case when received_amount_cents=round(claimed_amount_cents::numeric/2)::bigint and claimed_on is not null then 'paid' when received_amount_cents>0 then 'partial' else status end where supplier='Husqvarna' and customer_premium_gross_cents is null;
+alter table public.lgt_claims add constraint lgt_husqvarna_half_premium check (supplier <> 'Husqvarna' or (customer_premium_gross_cents is not null and customer_premium_gross_cents>0 and claimed_amount_cents=round(customer_premium_gross_cents::numeric/2)::bigint));
+insert into public.lgt_claim_events(claim_id,actor_id,action,details) select id,created_by,'note',jsonb_build_object('source','automatic_data_migration','reason','Husqvarna erstattet 50 % der Kundenprämie inkl. MwSt.','previous_claimed_amount_cents',customer_premium_gross_cents,'corrected_claimed_amount_cents',claimed_amount_cents,'received_amount_cents_unchanged',received_amount_cents,'status',status) from public.lgt_claims where supplier='Husqvarna';

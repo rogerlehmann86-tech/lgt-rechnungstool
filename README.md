@@ -71,3 +71,7 @@ Im Rechnungsarchiv auf «Löschen» klicken und die Sicherheitsabfrage bestätig
 ## Husqvarna-Prämien nacherfassen
 
 Die PDF-Analyse erkennt auch über mehrere Zeilen umbrochene Prämienbeträge mit «inkl. MwSt.». Bei nicht eindeutig erkannten Beträgen erscheint ein Hinweis. Im Rechnungsarchiv kann bei einer Rechnung ohne Prämie über «Prämie erfassen» eine offene Husqvarna-Forderung nachgetragen werden; die archivierte Rechnung bleibt unverändert.
+
+## Husqvarna-Rückerstattung (50 %)
+
+Die volle Kunden-Eintauschprämie inklusive MwSt. wird erkannt oder manuell eingegeben. Als Forderung wird ausschliesslich die kaufmännisch auf Rappen gerundete Hälfte gespeichert (z. B. CHF 150.00 → CHF 75.00). Beide Beträge werden separat angezeigt. Bei Nacherfassung wird ebenfalls die volle Kundenprämie eingegeben. Die Rechnung selbst bleibt unverändert. Bestehende Forderungen wurden einmalig von 100 % auf 50 % korrigiert, ohne Zahlungseingänge oder Rechnungen zu ändern; die Korrektur wurde im Verlauf protokolliert.

@@ -55,3 +55,9 @@ export function chDate(iso) { const m=String(iso??'').match(/^(\d{4})-(\d{2})-(\
 // ERP kann das Bruttototal auf 5 Rappen runden. Grössere Abweichungen sind keine übliche Rundung.
 export const ERP_ROUNDING_TOLERANCE = 5;
 export function sourceRoundingAllowed(calc) { return Math.abs(calc.sourceDifference) <= ERP_ROUNDING_TOLERANCE; }
+
+// Husqvarna erstattet 50 % der Kunden-Eintauschprämie inkl. MwSt.
+export function husqvarnaRefund(customerPremiumGross) {
+  if (!Number.isSafeInteger(customerPremiumGross) || customerPremiumGross < 0) throw new Error('Ungültige Kundenprämie.');
+  return roundDivide(customerPremiumGross,2);
+}

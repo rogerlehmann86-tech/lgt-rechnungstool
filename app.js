@@ -1,4 +1,4 @@
-import { swissDate, chDate, parseMoney, formatMoney, recalculate, sourceRoundingAllowed } from './money.js';
+import { swissDate, chDate, parseMoney, formatMoney, recalculate, sourceRoundingAllowed, husqvarnaRefund } from './money.js';
 import { analyzePdf, renderInvoicePdf, invoiceFilename } from './invoice.js';
 
 const cfg=window.LGT_CONFIG||{};
@@ -90,14 +90,14 @@ function renderDashboard(){
 function renderInvoices(){screen.innerHTML=`<div class="panel"><div class="panel-head"><div><h2>Rechnungsarchiv</h2><p>Einmalige Rapportnummer = Rechnungsnummer. Original und definitive PDF-Datei werden geschützt abgelegt.</p></div><label class="search"><span>⌕</span><input id="invoice-search" placeholder="Nummer, Kunde, Maschine suchen" aria-label="Rechnungen durchsuchen"></label></div><div id="invoice-results">${invoiceTable(invoices)}</div></div>`;}
 function renderClaims(){
   const outstanding=claims.filter(c=>c.status!=='paid');
-  screen.innerHTML=`<div class="intro"><div><h2>Husqvarna-Eintauschprämien</h2><p>Vom Kundenrabatt getrennt: Einforderung und effektiver Zahlungseingang.</p></div><div class="amount-large">${amt(outstanding.reduce((a,c)=>a+Math.max(0,(c.claimed_amount_cents||0)-(c.received_amount_cents||0)),0))}<small>Noch offen</small></div></div>
+  screen.innerHTML=`<div class="intro"><div><h2>Husqvarna-Eintauschprämien</h2><p>Husqvarna erstattet 50 % der Kunden-Eintauschprämie inkl. MwSt. Einforderung und Zahlungseingang separat verfolgen.</p></div><div class="amount-large">${amt(outstanding.reduce((a,c)=>a+Math.max(0,(c.claimed_amount_cents||0)-(c.received_amount_cents||0)),0))}<small>Noch offen</small></div></div>
     <div class="panel"><div class="panel-head"><div><h2>Prämienübersicht</h2><p>Einfordern → Zahlung erfassen → abschliessen</p></div><select id="claim-filter"><option value="all">Alle Status</option><option value="open">Offen</option><option value="claimed">Eingefordert</option><option value="partial">Teilzahlung</option><option value="paid">Erhalten</option></select></div><div id="claim-results">${claimTable(claims)}</div></div>`;
 }
 function claimTable(records){
   if(!records.length)return empty('Noch keine Husqvarna-Prämien erfasst');
-  return `<div class="table-scroll"><table><thead><tr><th>Rechnung / Kunde</th><th class="right">Prämie</th><th class="right">Erhalten</th><th>Datum eingefordert</th><th>Status</th><th>Aktion</th></tr></thead><tbody>${records.map(c=>{
+  return `<div class="table-scroll"><table><thead><tr><th>Rechnung / Kunde</th><th class="right">Kundenprämie</th><th class="right">Rückforderung (50 %)</th><th class="right">Erhalten</th><th>Datum eingefordert</th><th>Status</th><th>Aktion</th></tr></thead><tbody>${records.map(c=>{
     const i=invoices.find(x=>x.id===c.invoice_id);
-    return `<tr><td><strong>#${esc(i?.number||'—')}</strong><small>${esc(i?.customer_name||'—')}</small></td><td class="right numeric">${amt(c.claimed_amount_cents)}</td><td class="right numeric">${amt(c.received_amount_cents||0)}</td><td>${displayDate(c.claimed_on)}</td><td><span class="pill ${statusClass(c.status)}">${status(c.status)}</span></td><td>${c.status==='open'?`<button class="btn small secondary" data-claim-request="${c.id}">Einforderung erfassen</button>`:c.status==='paid'?`<button class="text-btn" data-claim-history="${c.id}">Verlauf</button>`:`<button class="btn small secondary" data-claim-paid="${c.id}">Zahlung erfassen</button> <button class="text-btn" data-claim-history="${c.id}">Verlauf</button>`}</td></tr>`;
+    return `<tr><td><strong>#${esc(i?.number||'—')}</strong><small>${esc(i?.customer_name||'—')}</small></td><td class="right numeric">${c.customer_premium_gross_cents==null?'—':amt(c.customer_premium_gross_cents)}</td><td class="right numeric">${amt(c.claimed_amount_cents)}</td><td class="right numeric">${amt(c.received_amount_cents||0)}</td><td>${displayDate(c.claimed_on)}</td><td><span class="pill ${statusClass(c.status)}">${status(c.status)}</span></td><td>${c.status==='open'?`<button class="btn small secondary" data-claim-request="${c.id}">Einforderung erfassen</button>`:c.status==='paid'?`<button class="text-btn" data-claim-history="${c.id}">Verlauf</button>`:`<button class="btn small secondary" data-claim-paid="${c.id}">Zahlung erfassen</button> <button class="text-btn" data-claim-history="${c.id}">Verlauf</button>`}</td></tr>`;
   }).join('')}</tbody></table></div>`;
 }
 function renderCreate(){
@@ -150,8 +150,8 @@ function createFields(){
   </div><div class="divider"></div><h3>Eintausch und Herstellerprämie</h3>
   ${analysis.standaloneTrade?`<div class="notice warning">Im ERP ist bereits eine eigenständige <strong>Eintausch</strong>-Position enthalten. Ein zusätzlicher Abzug ist standardmässig gesperrt.</div>`:''}
   <label class="toggle"><input type="checkbox" id="contained" ${analysis.standaloneTrade?'checked':''}><span>Nur Rechnung / Eintausch bereits enthalten (kein zusätzlicher Abzug)</span></label>
-  <div class="form-grid"><label>Zusätzlicher Eintausch inkl. MwSt. (CHF)<input id="trade-gross" inputmode="decimal" value="0.00" ${analysis.standaloneTrade?'disabled':''}></label><label>Husqvarna-Prämie (CHF inkl. MwSt.)<input id="premium-gross" inputmode="decimal" value="${(analysis.premiumGross/100).toFixed(2)}"><small>Separater Rückforderungsbetrag, nicht nochmals abziehen</small></label></div>
-  ${analysis.premiumUnresolved?'<div class="notice warning">Eintauschprämie im PDF vorhanden, Bruttobetrag nicht vollständig erkannt. Bitte Prämienbetrag manuell kontrollieren und ergänzen.</div>':analysis.premiumFound?'<p class="helper">Husqvarna-Eintauschprämie automatisch erkannt: '+amt(analysis.premiumGross)+'</p>':''}
+  <div class="form-grid"><label>Zusätzlicher Eintausch inkl. MwSt. (CHF)<input id="trade-gross" inputmode="decimal" value="0.00" ${analysis.standaloneTrade?'disabled':''}></label><label>Kunden-Eintauschprämie (CHF inkl. MwSt.)<input id="premium-gross" inputmode="decimal" value="${(analysis.premiumGross/100).toFixed(2)}"><small>Volle Prämie gemäss ERP, nicht nochmals abziehen.</small></label><label class="full">Husqvarna-Rückforderung (50 %)<input id="refund-display" value="${esc(amt(husqvarnaRefund(analysis.premiumGross)))}" readonly><small>Dieser Betrag wird als offene Forderung gespeichert.</small></label></div>
+  ${analysis.premiumUnresolved?'<div class="notice warning">Eintauschprämie im PDF vorhanden, Bruttobetrag nicht vollständig erkannt. Bitte Prämienbetrag manuell kontrollieren und ergänzen.</div>':analysis.premiumFound?'<p class="helper">Kunden-Eintauschprämie automatisch erkannt: '+amt(analysis.premiumGross)+'</p>':''}
   <p class="helper">Artikel, Preise und Rabatte des ERP-Exports bleiben unverändert. Ein zusätzlicher Eintausch wird nur nach erfolgreicher Platz- und Summenprüfung eingefügt.</p>`;
 }
 function formTrade(){if($('#contained')?.checked)return 0;return parseMoney($('#trade-gross')?.value||'0.00');}
@@ -194,7 +194,7 @@ function getCreateValues(){
   if(!/^\d{4}-\d\d-\d\d$/.test(date)||Number.isNaN(new Date(date+'T12:00:00').getTime()))throw new Error('Rechnungsdatum fehlt oder ist ungültig.');
   if(premium<0)throw new Error('Prämienbetrag darf nicht negativ sein.');
   if(!sourceRoundingAllowed(calc))throw new Error('Originalsummen weichen um mehr als CHF 0.05 ab. Bitte ERP-Export prüfen.');
-  return {number,customer,date,customerNo,machine,premium,calc};
+  return {number,customer,date,customerNo,machine,premium,refund:husqvarnaRefund(premium),calc};
 }
 async function makePreview(){
   await customerLookup;
@@ -239,8 +239,8 @@ async function saveInvoice(){
   const ready=await supabase.from('lgt_invoices').update({files_ready:true}).eq('id',id);
   if(ready.error)throw ready.error;
   let premiumError=null;
-  if(vals.premium>0){
-    const c=await supabase.from('lgt_claims').insert({invoice_id:id,claimed_amount_cents:vals.premium,
+  if(vals.refund>0){
+    const c=await supabase.from('lgt_claims').insert({invoice_id:id,customer_premium_gross_cents:vals.premium,claimed_amount_cents:vals.refund,
       received_amount_cents:0,status:'open',supplier:'Husqvarna',created_by:user.id});
     if(c.error)premiumError=c.error.message;
   }
@@ -297,26 +297,27 @@ async function addArchivedClaim(id){
   const existing=await supabase.from('lgt_claims').select('id').eq('invoice_id',id).eq('supplier','Husqvarna').maybeSingle();
   if(existing.error)throw existing.error;
   if(existing.data){await reloadRecords();render();throw new Error('Für diese Rechnung besteht bereits eine Husqvarna-Prämie.');}
-  const value=await ask({title:'Husqvarna-Prämie nacherfassen',confirm:'Offene Prämie speichern',body:`<p>Rechnung Nr. ${esc(inv.number)} – ${esc(inv.customer_name)}. Der Betrag wird separat erfasst, das Rechnungs-PDF bleibt unverändert.</p><label>Prämie inkl. MwSt. (CHF)<input name="premium" inputmode="decimal" required placeholder="150.00"></label>`});
+  const value=await ask({title:'Husqvarna-Prämie nacherfassen',confirm:'Offene Prämie speichern',body:`<p>Rechnung Nr. ${esc(inv.number)} – ${esc(inv.customer_name)}. Die Rückforderung beträgt 50 % der vollen Kundenprämie. Das Rechnungs-PDF bleibt unverändert.</p><label>Volle Kundenprämie inkl. MwSt. (CHF)<input name="premium" id="archived-premium-gross" inputmode="decimal" required placeholder="150.00"></label><p>Rückforderung (50 %): <strong id="archived-refund-display">—</strong></p>`});
   if(!value)return;
   const premium=parseMoney(value.premium);
   if(premium<=0)throw new Error('Bitte einen positiven Prämienbetrag eingeben.');
-  const r=await supabase.from('lgt_claims').insert({invoice_id:id,claimed_amount_cents:premium,received_amount_cents:0,status:'open',supplier:'Husqvarna',created_by:user.id});
+  const refund=husqvarnaRefund(premium);
+  const r=await supabase.from('lgt_claims').insert({invoice_id:id,customer_premium_gross_cents:premium,claimed_amount_cents:refund,received_amount_cents:0,status:'open',supplier:'Husqvarna',created_by:user.id});
   if(r.error)throw r.error;
-  await reloadRecords();render();alertBox('Offene Husqvarna-Prämie von '+amt(premium)+' gespeichert.','success');
+  await reloadRecords();render();alertBox('Offene Husqvarna-Rückforderung von '+amt(refund)+' gespeichert.','success');
 }
 async function recordClaim(id,mode){
   const claim=claims.find(c=>c.id===id);if(!claim)throw new Error('Prämie nicht gefunden.');
   if(invoices.find(i=>i.id===claim.invoice_id)?.deletion_pending)throw new Error('Die zugehörige Rechnung ist zur Löschung markiert.');
   if(mode==='requested'){
-    const val=await ask({title:'Einforderung bei Husqvarna',confirm:'Einforderung dokumentieren',body:`<p>Ab jetzt ist dieser Betrag als bei Husqvarna eingefordert gekennzeichnet.</p><label>Datum der Einforderung<input type="date" name="date" value="${swissDate()}" required></label><label>Referenz / Bemerkung<input name="reference" placeholder="Husqvarna-Antragsnummer (optional)"></label>`});
+    const val=await ask({title:'Einforderung bei Husqvarna',confirm:'Einforderung dokumentieren',body:`<p>Rückforderung von <strong>${amt(claim.claimed_amount_cents)}</strong> (50 % der Kundenprämie) als bei Husqvarna eingefordert kennzeichnen.</p><label>Datum der Einforderung<input type="date" name="date" value="${swissDate()}" required></label><label>Referenz / Bemerkung<input name="reference" placeholder="Husqvarna-Antragsnummer (optional)"></label>`});
     if(!val)return;
     const before={...claim};
     const r=await supabase.from('lgt_claims').update({status:'claimed',claimed_on:val.date,reference:val.reference||null}).eq('id',id).eq('status','open');
     if(r.error)throw r.error;
     await appendEvent(id,'claimed',{previous_status:before.status,date:val.date,reference:val.reference||''});
   }else{
-    const val=await ask({title:'Zahlung von Husqvarna erfassen',confirm:'Zahlung verbuchen',body:`<p>Bitte kumulativ den bisher effektiv erhaltenen Betrag erfassen. Prämie: <strong>${amt(claim.claimed_amount_cents)}</strong>.</p><label>Insgesamt erhalten (CHF)<input name="received" inputmode="decimal" value="${((claim.received_amount_cents||0)/100).toFixed(2)}" required></label><label>Datum Zahlungseingang<input type="date" name="date" value="${swissDate()}" required></label><label>Bemerkung<input name="note" placeholder="Zahlung / Differenz (optional)"></label>`});
+    const val=await ask({title:'Zahlung von Husqvarna erfassen',confirm:'Zahlung verbuchen',body:`<p>Bitte kumulativ den bisher effektiv erhaltenen Betrag erfassen. Volle Rückerstattung: <strong>${amt(claim.claimed_amount_cents)}</strong> (50 % der Kundenprämie).</p><label>Insgesamt erhalten (CHF)<input name="received" inputmode="decimal" value="${((claim.received_amount_cents||0)/100).toFixed(2)}" required></label><label>Datum Zahlungseingang<input type="date" name="date" value="${swissDate()}" required></label><label>Bemerkung<input name="note" placeholder="Zahlung / Differenz (optional)"></label>`});
     if(!val)return;
     const received=parseMoney(val.received);
     if(received<0||received>claim.claimed_amount_cents)throw new Error('Zahlung muss zwischen CHF 0.00 und eingefordertem Betrag liegen.');
@@ -371,6 +372,10 @@ document.addEventListener('change',async e=>{
   if(e.target.id==='claim-filter'){$('#claim-results').innerHTML=claimTable(e.target.value==='all'?claims:claims.filter(c=>c.status===e.target.value));}
 });
 document.addEventListener('input',e=>{
+  if(e.target.id==='premium-gross'||e.target.id==='archived-premium-gross'){
+    const out=$(e.target.id==='premium-gross'?'#refund-display':'#archived-refund-display');
+    if(out){let display='—';try{display=amt(husqvarnaRefund(parseMoney(e.target.value||'0.00')));}catch{}if(out.tagName==='INPUT')out.value=display;else out.textContent=display;}
+  }
   if(e.target.id==='invoice-search'){const q=e.target.value.toLocaleLowerCase('de-CH');$('#invoice-results').innerHTML=invoiceTable(invoices.filter(i=>[i.number,i.customer_name,i.machine,i.customer_number].some(v=>String(v||'').toLocaleLowerCase('de-CH').includes(q))));}
 });
 initialize();
