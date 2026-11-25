@@ -18,24 +18,17 @@ Interne Web-Anwendung der **Lehmann Gerätetechnik GmbH** zur Umwandlung von ERP
 
 ## Technischer Aufbau
 
-Statische Website (`index.html`, `style.css`, `app.js`, `invoice.js`, `money.js`) ohne Build-Prozess. Es werden fest versionierte Browserbibliotheken verwendet: PDF.js `6.5.438`, pdf-lib `1.17.1`, Supabase JS `2.119.2` (CDN). Geldberechnungen basieren auf Integer-Rappen; keine Gleitkomma-Betragsrechnung. `db/schema.sql` ist die separate Supabase-Struktur.
+Statische Website (`index.html`, `style.css`, `app.js`, `invoice.js`, `money.js`) ohne Build-Prozess. Es werden fest versionierte Browserbibliotheken verwendet: PDF.js `6.5.438`, pdf-lib `1.17.1`, Supabase JS `2.119.2` (CDN). Geldberechnungen basieren auf Integer-Rappen; keine Gleitkomma-Betragsrechnung. `db/schema.sql` enthält die zusätzlichen Tabellen im gemeinsamen Supabase-Projekt «Lehmann Werbetool».
 
-## Supabase einrichten
+## Supabase-Anbindung
 
-1. Eine **separate Supabase-Projektinstanz** für das Rechnungstool auswählen/anlegen (mögliche Kosten bitte vorab prüfen). Die Daten der bestehenden Werbe-/Miettools nicht unüberlegt vermischen.
-2. Das SQL in `db/schema.sql` im SQL-Editor des ausgewählten Projekts ausführen. Das richtet vier Tabellen, RLS-Richtlinien und den privaten Storage-Bucket ein. **Nur in der ausgewählten Rechnungstool-Datenbank!**
-3. Unter **Authentication → Users** den gewünschten LGT-Benutzer erstellen. Öffentliche Registrierung in den Supabase Auth-Einstellungen deaktivieren, falls aktiviert.
-4. Im SQL-Editor die Benutzer-UUID freischalten:
+Das bestehende Supabase-Projekt «Lehmann Werbetool» ist angebunden. Die vier neuen `lgt_*`-Tabellen und der private Storage-Bucket `lgt-rechnungen` wurden eingerichtet. Die vorhandene Kundentabelle `contacts` bleibt unverändert; die ERP-Kundennummer wird mit `contacts.id` abgeglichen. Rechnungsdaten und PDF bleiben als historische Momentaufnahme erhalten. Die logische Referenz ohne Fremdschlüssel verhindert, dass Kundenimporte durch die Rechnungsablage blockiert werden.
 
-   ```sql
-   insert into public.lgt_staff (user_id, active)
-   values ('HIER-DIE-UUID-AUS-AUTH-USERS', true);
-   ```
+Das bestehende bestätigte Werbetool-Konto wurde für das Rechnungstool freigeschaltet. Weitere Rechnungstool-Berechtigungen werden ausschliesslich vom Administrator vergeben. Achtung: Bestehende Werbetool-Richtlinien erlauben angemeldeten Benutzern breiten Zugriff auf Werbedaten. Keine weiteren Auth-Benutzer anlegen, bevor diese Berechtigungen geprüft und die öffentliche Registrierung deaktiviert ist.
 
-5. `config.js` nur mit der Supabase-Projekt-URL und dem **Publishable Key** ausfüllen. Diese zwei Werte sind für den Browser bestimmt. **Nie `service_role`, `sb_secret_...`, Datenbank-Passwort oder andere geheime Schlüssel hinterlegen.**
-6. Website z. B. mittels GitHub Pages bereitstellen (Verfügbarkeit von Pages aus einem privaten Repository hängt vom GitHub-Plan ab). Da Pfade relativ sind, funktioniert die Website unter `/lgt-rechnungstool/`. In den Supabase Auth-Einstellungen die veröffentlichte URL als Site URL / Redirect URL pflegen.
+`config.js` enthält die Projekt-URL und den browserseitigen Publishable Key, niemals einen geheimen Schlüssel. Das Schema ist bereits angewandt und darf nicht erneut ausgeführt werden.
 
-Ohne Supabase-Verbindung lässt sich die PDF-Vorschau lokal testen; Archivieren und Prämienbuchungen sind absichtlich deaktiviert.
+Für die Veröffentlichung GitHub Pages oder ein anderes statisches Hosting nutzen. Die Verfügbarkeit von Pages bei privaten Repositories hängt vom GitHub-Plan ab. Bei neuen Auth-Redirects bestehende Einstellungen des Werbetools erhalten. Die Datenbankanbindung ist geprüft; der Browser-/PDF-End-to-End-Test steht noch aus.
 
 ## Arbeitsschritte im Alltag
 
