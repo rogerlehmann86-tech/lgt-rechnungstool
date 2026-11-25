@@ -1,5 +1,5 @@
-import { swissDate, chDate, parseMoney, formatMoney, recalculate, sourceRoundingAllowed, husqvarnaRefund } from './money.js';
-import { analyzePdf, renderInvoicePdf, invoiceFilename } from './invoice.js';
+import { swissDate, chDate, parseMoney, formatMoney, recalculate, sourceRoundingAllowed, husqvarnaRefund } from './money.js?v=20261125-1623';
+import { analyzePdf, renderInvoicePdf, invoiceFilename } from './invoice.js?v=20261125-1623';
 
 const cfg=window.LGT_CONFIG||{};
 let supabase=null, user=null, authorized=false, invoices=[],claims=[];

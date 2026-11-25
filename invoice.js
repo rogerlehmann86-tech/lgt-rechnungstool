@@ -1,4 +1,4 @@
-import { parseMoney, parseVatBps, recalculate, formatMoney, chDate, sourceRoundingAllowed } from './money.js';
+import { parseMoney, parseVatBps, recalculate, formatMoney, chDate, sourceRoundingAllowed } from './money.js?v=20261125-1623';
 const PDFJS_VERSION = '6.5.438';
 let pdfjs;
 async function getPdfJs() {

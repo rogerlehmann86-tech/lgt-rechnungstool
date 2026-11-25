@@ -173,3 +173,23 @@ end $$;
 update public.lgt_claims set customer_premium_gross_cents=claimed_amount_cents,claimed_amount_cents=round(claimed_amount_cents::numeric/2)::bigint,status=case when received_amount_cents=round(claimed_amount_cents::numeric/2)::bigint and claimed_on is not null then 'paid' when received_amount_cents>0 then 'partial' else status end where supplier='Husqvarna' and customer_premium_gross_cents is null;
 alter table public.lgt_claims add constraint lgt_husqvarna_half_premium check (supplier <> 'Husqvarna' or (customer_premium_gross_cents is not null and customer_premium_gross_cents>0 and claimed_amount_cents=round(customer_premium_gross_cents::numeric/2)::bigint));
 insert into public.lgt_claim_events(claim_id,actor_id,action,details) select id,created_by,'note',jsonb_build_object('source','automatic_data_migration','reason','Husqvarna erstattet 50 % der Kundenprämie inkl. MwSt.','previous_claimed_amount_cents',customer_premium_gross_cents,'corrected_claimed_amount_cents',claimed_amount_cents,'received_amount_cents_unchanged',received_amount_cents,'status',status) from public.lgt_claims where supplier='Husqvarna';
+
+-- Compatibility with previously cached frontends: derive the claim from gross premium on insert.
+create function public.lgt_normalize_husqvarna_claim() returns trigger
+language plpgsql security invoker set search_path='' as $$
+begin
+  if new.supplier = 'Husqvarna' then
+    if new.customer_premium_gross_cents is null then
+      new.customer_premium_gross_cents := new.claimed_amount_cents;
+    end if;
+    if new.customer_premium_gross_cents is null or new.customer_premium_gross_cents <= 0 then
+      raise exception 'Die volle Kundenprämie muss positiv sein.';
+    end if;
+    new.claimed_amount_cents := round(new.customer_premium_gross_cents::numeric/2)::bigint;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.lgt_normalize_husqvarna_claim() from public, anon, authenticated;
+create trigger lgt_normalize_husqvarna_claim_before_insert before insert on public.lgt_claims
+for each row execute function public.lgt_normalize_husqvarna_claim();

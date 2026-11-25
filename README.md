@@ -75,3 +75,5 @@ Die PDF-Analyse erkennt auch über mehrere Zeilen umbrochene Prämienbeträge mi
 ## Husqvarna-Rückerstattung (50 %)
 
 Die volle Kunden-Eintauschprämie inklusive MwSt. wird erkannt oder manuell eingegeben. Als Forderung wird ausschliesslich die kaufmännisch auf Rappen gerundete Hälfte gespeichert (z. B. CHF 150.00 → CHF 75.00). Beide Beträge werden separat angezeigt. Bei Nacherfassung wird ebenfalls die volle Kundenprämie eingegeben. Die Rechnung selbst bleibt unverändert. Bestehende Forderungen wurden einmalig von 100 % auf 50 % korrigiert, ohne Zahlungseingänge oder Rechnungen zu ändern; die Korrektur wurde im Verlauf protokolliert.
+
+Die Datenbank berechnet bei jedem neuen Husqvarna-Eintrag die Rückforderung zusätzlich selbst. Ältere Browser-Versionen, die nur die volle Kundenprämie im bisherigen Feld senden, bleiben damit kompatibel. Die 50-%-Prüfregel bleibt aktiv. Die JavaScript-Dateien werden mit einer Versionskennung geladen, um veraltete Browser-Caches zu vermeiden.
