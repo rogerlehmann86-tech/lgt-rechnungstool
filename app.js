@@ -107,13 +107,26 @@ function renderCreate(){
     <div id="calc-panel">${analyzed?renderCalculation():`<div class="preview-placeholder">PDF-Vorschau erscheint hier.</div>`}</div>
     <div id="pdf-viewer">${issued?`<iframe title="Rechnungsvorschau" src="${pdfUrl}"></iframe>`:''}</div>
     <div class="action-stack" id="generate-actions">${analyzed?generateActions():''}</div></div></div>`;
+  if(analyzed)void checkCustomer();
+}
+async function checkCustomer(){
+  const target=$('#customer-match'), field=$('#customer-number');
+  if(!target||!field||!connected())return;
+  const number=field.value.trim();
+  if(!/^\d{1,18}$/.test(number)){target.textContent="Keine gültige ERP-Kundennummer für den Stammabgleich.";return;}
+  target.textContent="Kundenstamm wird geprüft …";
+  const {data,error}=await supabase.from("contacts").select("id,company,firstname,lastname,zip,city").eq("id",number).maybeSingle();
+  if(!target.isConnected||field.value.trim()!==number)return;
+  if(error){target.textContent="Kundenabgleich nicht verfügbar: "+error.message;return;}
+  if(!data){target.textContent="Kundennummer im Werbetool nicht gefunden. Rechnung kann mit den ERP-Daten gespeichert werden.";return;}
+  target.textContent="Kundenstamm: "+[data.company,[data.firstname,data.lastname].filter(Boolean).join(" "),[data.zip,data.city].filter(Boolean).join(" ")].filter(Boolean).join(" · ")+" (bitte mit PDF vergleichen)";
 }
 function createFields(){
   const s=analysis.summary;
   return `<div class="divider"></div><div class="form-grid"><label>Rechnungsnummer (= Rapport)<input id="invoice-number" value="${esc(analysis.report)}" readonly></label><label>Rechnungsdatum<input id="invoice-date" type="date" value="${swissDate()}" required></label>
     <label class="full">Kundenname <small>(bitte prüfen)</small><input id="customer-name" value="${esc(analysis.customer)}" placeholder="Vorname Nachname" required></label>
     <label>Kundennummer<input id="customer-number" value="${esc(analysis.customerNo)}"></label><label>Mehrwertsteuer<input value="${s?(s.vatBps/100).toFixed(2)+'%':'Nicht erkannt'}" disabled></label>
-    <label class="full">Maschine<input id="machine" value="${esc(analysis.machine)}"></label>
+    <div class="full helper" id="customer-match" aria-live="polite"></div><label class="full">Maschine<input id="machine" value="${esc(analysis.machine)}"></label>
   </div><div class="divider"></div><h3>Eintausch und Herstellerprämie</h3>
   ${analysis.standaloneTrade?`<div class="notice warning">Im ERP ist bereits eine eigenständige <strong>Eintausch</strong>-Position enthalten. Ein zusätzlicher Abzug ist standardmässig gesperrt.</div>`:''}
   <label class="toggle"><input type="checkbox" id="contained" ${analysis.standaloneTrade?'checked':''}><span>Nur Rechnung / Eintausch bereits enthalten (kein zusätzlicher Abzug)</span></label>
@@ -281,7 +294,7 @@ document.addEventListener('change',async e=>{
   if(e.target.id==='pdf-file'){try{await loadFile(e.target.files[0]);}catch(error){alertBox(error.message,'error');}return;}
   if(e.target.id==='contained'){const trade=$('#trade-gross');trade.disabled=e.target.checked;if(e.target.checked)trade.value='0.00';resetPreview();$('#calc-panel').innerHTML=renderCalculation();return;}
   if(['invoice-date','trade-gross','customer-name','customer-number','machine','premium-gross'].includes(e.target.id)){
-    resetPreview();if(analysis)$('#calc-panel').innerHTML=renderCalculation();return;
+    resetPreview();if(analysis)$('#calc-panel').innerHTML=renderCalculation();if(e.target.id==='customer-number')void checkCustomer();return;
   }
   if(e.target.id==='claim-filter'){$('#claim-results').innerHTML=claimTable(e.target.value==='all'?claims:claims.filter(c=>c.status===e.target.value));}
 });
