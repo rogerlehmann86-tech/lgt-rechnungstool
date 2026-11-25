@@ -77,3 +77,7 @@ Die PDF-Analyse erkennt auch über mehrere Zeilen umbrochene Prämienbeträge mi
 Die volle Kunden-Eintauschprämie inklusive MwSt. wird erkannt oder manuell eingegeben. Als Forderung wird ausschliesslich die kaufmännisch auf Rappen gerundete Hälfte gespeichert (z. B. CHF 150.00 → CHF 75.00). Beide Beträge werden separat angezeigt. Bei Nacherfassung wird ebenfalls die volle Kundenprämie eingegeben. Die Rechnung selbst bleibt unverändert. Bestehende Forderungen wurden einmalig von 100 % auf 50 % korrigiert, ohne Zahlungseingänge oder Rechnungen zu ändern; die Korrektur wurde im Verlauf protokolliert.
 
 Die Datenbank berechnet bei jedem neuen Husqvarna-Eintrag die Rückforderung zusätzlich selbst. Ältere Browser-Versionen, die nur die volle Kundenprämie im bisherigen Feld senden, bleiben damit kompatibel. Die 50-%-Prüfregel bleibt aktiv. Die JavaScript-Dateien werden mit einer Versionskennung geladen, um veraltete Browser-Caches zu vermeiden.
+
+## ERP-Importvarianten
+
+Proformarechnung, Kostenvoranschlag, Lieferschein und Rechnung werden unterstützt. Rapport-Nr., Lieferschein-Nr., eindeutige Dokumentnummer und Kunden-Nr. werden erkannt. Die MwSt.-Summenzeile muss unter der Nettosumme stehen und einen Steuersatz sowie Betrag enthalten. Mehrseitige Exporte mit Artikeln auf der Summenseite erhalten einen zusätzlichen Eintausch unmittelbar vor der Summe, sofern ausreichend Platz vorhanden ist. Prämienbeträge können auf separaten Folgezeilen stehen.

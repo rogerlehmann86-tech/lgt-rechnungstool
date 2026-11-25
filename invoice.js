@@ -1,4 +1,4 @@
-import { parseMoney, parseVatBps, recalculate, formatMoney, chDate, sourceRoundingAllowed } from './money.js?v=20261125-1623';
+import { parseMoney, parseVatBps, recalculate, formatMoney, chDate, sourceRoundingAllowed } from './money.js?v=20261125-import4';
 const PDFJS_VERSION = '6.5.438';
 let pdfjs;
 async function getPdfJs() {
@@ -10,7 +10,7 @@ async function getPdfJs() {
 }
 function normalize(s) { return String(s??'').replace(/\s+/g,' ').trim(); }
 function rowText(row) { return row.items.map(i=>i.str).join(' ').replace(/\s+/g,' ').trim(); }
-function makeRows(items) {
+export function makeRows(items) {
   const rows = [];
   for (const item of items.filter(i=>normalize(i.str))) {
     const y = item.transform[5];
@@ -28,12 +28,14 @@ function lineAmount(text) {
   if (!matches.length) return null;
   try { return parseMoney(matches.at(-1)[0]); } catch { return null; }
 }
-function parseSummary(rows) {
+export function parseSummary(rows) {
   const entries = rows.map(r=>({row:r,text:rowText(r)}));
   const take=(re)=>entries.find(e=>re.test(e.text));
-  const sum=take(/^Summe\b/i), vat=take(/^MwSt\b/i), total=take(/^Total\b/i);
+  const sum=entries.find(e=>/^Summe\b/i.test(e.text)&&lineAmount(e.text)!==null);
+  const vat=sum&&entries.find(e=>e.row.y<sum.row.y && /^MwSt\.?\s*\d{1,2}(?:[.,]\d{1,2})?\s*%/i.test(e.text)&&lineAmount(e.text.replace(/^MwSt\.?\s*\d{1,2}(?:[.,]\d{1,2})?\s*%/i,''))!==null);
+  const total=vat&&entries.find(e=>e.row.y<vat.row.y&&/^Total\b/i.test(e.text)&&lineAmount(e.text)!==null);
   if (!sum||!vat||!total) return null;
-  const bpsMatch=vat.text.match(/MwSt\s*(\d{1,2}[.,]\d{1,2})\s*%/i);
+  const bpsMatch=vat.text.match(/MwSt\.?\s*(\d{1,2}(?:[.,]\d{1,2})?)\s*%/i);
   if(!bpsMatch) return null;
   try {
     const originalNet=lineAmount(sum.text), originalVat=lineAmount(vat.text), originalTotal=lineAmount(total.text);
@@ -44,7 +46,7 @@ function parseSummary(rows) {
 }
 // Only recognise document headings on the first page, not references in item descriptions.
 export function detectDocumentTitle(page) {
-  const pattern=/^(Proforma\s*[-–]?\s*rechnung|Kostenvoranschlag|Rechnung)(?=\s|:|$)(?:\s*(?:Nr\.?|Nummer|#)\s*:?\s*\d+|\s+\d+)?\s*:?\s*$/i;
+  const pattern=/^(Proforma\s*[-–]?\s*rechnung|Kostenvoranschlag|Lieferschein|Rechnung)(?=\s|:|$)(?:\s*(?:Nr\.?|Nummer|#)\s*:?\s*(\d{3,10})|\s+(\d{3,10}))?\s*:?\s*$/i;
   const candidates=[];
   for(const row of page.rows){
     if(row.y<page.height*.48)continue;
@@ -52,8 +54,8 @@ export function detectDocumentTitle(page) {
     if(!left.length)continue;
     const match=normalize(left.map(i=>i.str).join(' ')).match(pattern);
     if(!match)continue;
-    const type=/^proforma/i.test(match[1])?'Proformarechnung':/^kosten/i.test(match[1])?'Kostenvoranschlag':'Rechnung';
-    candidates.push({type,item:left[0],items:left,row});
+    const type=/^proforma/i.test(match[1])?'Proformarechnung':/^kosten/i.test(match[1])?'Kostenvoranschlag':/^liefer/i.test(match[1])?'Lieferschein':'Rechnung';
+    candidates.push({type,number:match[2]||match[3]||'',item:left[0],items:left,row});
   }
   return candidates.length===1?candidates[0]:null;
 }
@@ -65,6 +67,17 @@ export function originalInvoiceDate(page,title) {
   const iso=m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
   const date=new Date(iso+'T12:00:00Z');
   return !Number.isNaN(date.getTime())&&date.toISOString().slice(0,10)===iso?iso:'';
+}
+
+export function detectReferences(page,heading){
+  const text=page.rows.map(rowText).join('\n');
+  const rapport=text.match(/\bRapport[\s\-–]*(?:Nr\.?|nummer)\s*:?\s*(\d{3,10})\b/i)?.[1]||'';
+  const delivery=text.match(/\bLieferschein[\s\-–]*(?:Nr\.?|nummer)\s*:?\s*(\d{3,10})\b/i)?.[1]||'';
+  const customerNo=text.match(/\bKunden[\s\-–]*(?:nummer|Nr\.?)\s*:?\s*(\d+)\b/i)?.[1]||'';
+  const report=rapport||delivery||heading?.number||'';
+  const referenceConflict=Boolean(heading?.number&&report&&heading.number!==report);
+  const machine=(text.match(/^Maschine\s*:?\s*(.+)$/im)?.[1]||'').split(/\s+Kontrollschild\s*:/i)[0].trim();
+  return {report,customerNo,machine,referenceConflict,referenceType:rapport?'Rapport-Nr.':delivery?'Lieferschein-Nr.':'Dokumentnummer'};
 }
 
 // ERP descriptions can wrap before "inkl. MwSt.", with numeric article columns in between.
@@ -83,6 +96,14 @@ export function detectPremium(lines){
     const nextInclusive=/^inkl\.?(?:\s|$)/i.test(next);
     const splitAmount= !amount && /^\s*\(\s*$/.test(tail) && next.match(/^(?:CHF\s*|Fr\.\s*)?(\d+(?:[’' ]\d{3})*(?:[.,]\d{2})?)(?:\s*[.,]\s*[-–—])?(?=\s|[)]|$)/i);
     let value=null;
+    if(!amount && !tail.trim()){
+      const m=next.match(/^\(\s*(?:CHF\s*|Fr\.\s*)?(\d+(?:[’' ]\d{3})*(?:[.,]\d{2})?)(?:\s*[.,]\s*[-–—])?\s*inkl\.?(?=\s|\)|$)/i);
+      if(m)value=m[1];
+      else if(/^\(/.test(next)&&/^inkl\.?(?:\s|$)/i.test(following)){
+        const split=next.match(/^\(\s*(?:CHF\s*|Fr\.\s*)?(\d+(?:[’' ]\d{3})*(?:[.,]\d{2})?)(?:\s*[.,]\s*[-–—])?\s*$/i);
+        if(split)value=split[1];
+      }
+    }
     if(amount&&(ownInclusive||nextInclusive))value=amount[1];
     if(splitAmount&&(/^\s*inkl\.?(?:\s|$)/i.test(next.slice(splitAmount[0].length))||/^inkl\.?(?:\s|$)/i.test(following)))value=splitAmount[1];
     try{const cents=value===null?0:parseMoney(value);if(cents>0){gross+=cents;}else{unresolved++;}}catch{unresolved++;}
@@ -105,10 +126,7 @@ export async function analyzePdf(bytes) {
   const existingDate=originalInvoiceDate(pages[0],documentTitle);
   const allLines=pages.flatMap(p=>p.rows.map(rowText));
   const whole=allLines.join('\n');
-  const matchReport=whole.match(/Rapport[\s-]*Nr\.?\s*:?\s*(\d{3,10})/i);
-  const report=matchReport?.[1]??'';
-  const matchCustomerNo=whole.match(/Kundennummer\s*:?\s*(\d+)/i);
-  const machine=whole.match(/^Maschine\s*:?\s*(.*)$/im)?.[1]??'';
+  const refs=detectReferences(pages[0],documentTitle);
   const summaryCandidates=pages.map(p=>parseSummary(p.rows));
   const summaryIdx=summaryCandidates.findLastIndex(Boolean);
   const summary=summaryCandidates[summaryIdx];
@@ -120,7 +138,7 @@ export async function analyzePdf(bytes) {
   const standaloneTrade=allLines.some(s=>/^Eintausch\b(?!prämie)/i.test(s) && !/^Eintauschprämie/i.test(s));
   const premium=detectPremium(allLines);
   const premiumGross=premium.gross;
-  return {doc,pages,documentTitle,documentType:documentTitle?.type??'',existingDate,report,customer,customerNo:matchCustomerNo?.[1]??'',machine,
+  return {doc,pages,documentTitle,documentType:documentTitle?.type??'',existingDate,...refs,customer,
     summaryIdx,summary,rates,standaloneTrade,premiumGross,premiumFound:premium.found,premiumUnresolved:premium.unresolved,rawText:whole,byteLength:source.length};
 }
 function putText(ctx,x,y,label,fontSize,color='#161616',align='left') {
@@ -131,7 +149,7 @@ function putText(ctx,x,y,label,fontSize,color='#161616',align='left') {
 function paintTitle(ctx,analysis,scale,invoiceNumber,date) {
   const {items,width,height}=analysis.pages[0];
   const heading=analysis.documentTitle??detectDocumentTitle(analysis.pages[0]);
-  if(!heading) throw new Error('Kein eindeutiger ERP-Dokumenttitel erkannt. Unterstützt: Proformarechnung, Kostenvoranschlag und Rechnung.');
+  if(!heading) throw new Error('Kein eindeutiger ERP-Dokumenttitel erkannt. Unterstützt: Proformarechnung, Kostenvoranschlag, Lieferschein und Rechnung.');
   const title=heading.item;
   const x=title.transform[4]*scale,base=(height-title.transform[5])*scale;
   const font=Math.max(10,(title.height||13)*scale);
@@ -164,40 +182,47 @@ function paintSummary(ctx,analysis,scale,calc) {
     putText(ctx,right,base,formatMoney(amount,'Fr. '),font,'#161616','right');
   }
 }
-function paintTradeRow(ctx,analysis,scale,discountNet) {
-  // Konservativ: nur freie Zeile unter letzter Position und vor ERP-Seitenfuss verwenden.
-  const summaryIdx=analysis.summaryIdx;
-  const idx=summaryIdx>0?summaryIdx-1:summaryIdx;
-  const p=analysis.pages[idx];
-  const filtered=p.items.filter(i=>i.transform[5]>35 && i.transform[5]<p.height*.70 &&
-    !/Seite\s*\d+\s*von\s*\d+/i.test(i.str) &&
-    !/^(Summe|MwSt|Total)\b/i.test(normalize(i.str)));
-  const lastY=Math.min(...filtered.map(i=>i.transform[5]));
-  const foot=p.items.find(i=>/Seite\s*\d+\s*von\s*\d+/i.test(i.str));
-  const footerY=foot?.transform[5]??35;
-  if(!Number.isFinite(lastY) || lastY-footerY<34) {
-    throw new Error('Für eine zusätzliche Eintauschposition ist kein sicherer Platz erkennbar. Kein PDF erzeugt – Vorlage manuell prüfen.');
+export function findTradeSlot(analysis) {
+  const idx=analysis.summaryIdx, summaryPage=analysis.pages[idx], sumY=analysis.summary.rowSum.y;
+  const priced=row=>row.items.some(i=>i.transform[4]>summaryPage.width*.72&&/^-?\d[\d’',.]*[.,]\d{2}$/.test(normalize(i.str))) &&
+    row.items.some(i=>i.transform[4]<summaryPage.width*.48 && normalize(i.str));
+  const hasArticles=summaryPage.rows.some(r=>r.y>sumY+3&&priced(r));
+  let pageIndex=idx, p=summaryPage, boundary=sumY;
+  if(!hasArticles && idx>0){
+    pageIndex=idx-1;p=analysis.pages[pageIndex];
+    const foot=p.rows.find(r=>/Seite\s*\d+\s*von\s*\d+/i.test(rowText(r)));
+    boundary=foot?.y??35;
   }
-  const rowY=lastY-18;
-  const base=(p.height-rowY)*scale;
-  const font=10*scale;
-  ctx.fillStyle='#fff';ctx.fillRect(40*scale,base-12*scale,(p.width-65)*scale,16*scale);
-  putText(ctx,50*scale,base,'Eintausch',font);
-  putText(ctx,p.width*.57*scale,base,'1 Stk.',font);
-  putText(ctx,p.width*.79*scale,base,formatMoney(-discountNet,''),font,'#161616','right');
-  putText(ctx,(p.width-35)*scale,base,formatMoney(-discountNet,''),font,'#161616','right');
-  return idx;
+  const articleRows=p.rows.filter(r=>r.y>boundary+3);
+  const last=articleRows.at(-1);
+  if(!last)throw new Error('Keine Artikelposition vor der Summenzeile erkannt.');
+  const rowY=last.y-14;
+  if(rowY-boundary<11)throw new Error('Für die zusätzliche Eintauschposition fehlt Platz zwischen Artikeln und Total. Bitte Vorlage prüfen.');
+  const priceRow=articleRows.findLast(priced);
+  const amounts=priceRow?.items.filter(i=>i.transform[4]>p.width*.58&&/^-?\d[\d’',.]*[.,]\d{2}$/.test(normalize(i.str)))||[];
+  const ends=amounts.map(i=>i.transform[4]+(i.width||0)).sort((a,b)=>a-b);
+  const qty=priceRow?.items.find(i=>/^\d+(?:[.,]\d+)?\s*(?:Stk\.?|Std\.?|h|m)$/i.test(normalize(i.str)));
+  return {pageIndex,rowY,left:Math.min(...last.items.map(i=>i.transform[4])),qty:qty?.transform[4]??p.width*.51,unitRight:ends.length>=2?ends[0]:p.width*.695,totalRight:ends.at(-1)??p.width*.89};
+}
+function paintTradeRow(ctx,analysis,scale,discountNet,slot) {
+  const p=analysis.pages[slot.pageIndex],base=(p.height-slot.rowY)*scale,font=9*scale;
+  putText(ctx,Math.max(40,slot.left)*scale,base,'Eintausch',font);
+  putText(ctx,slot.qty*scale,base,'1 Stk.',font);
+  putText(ctx,slot.unitRight*scale,base,formatMoney(-discountNet,''),font,'#161616','right');
+  putText(ctx,slot.totalRight*scale,base,formatMoney(-discountNet,''),font,'#161616','right');
 }
 export async function renderInvoicePdf(analysis,opts) {
   const {PDFDocument}=window.PDFLib??{};
   if(!PDFDocument) throw new Error('PDF-Bibliothek nicht geladen. Bitte Seite neu laden.');
-  if(!analysis.documentTitle&&!detectDocumentTitle(analysis.pages[0])) throw new Error('ERP-Dokumenttyp nicht erkannt. Proformarechnung, Kostenvoranschlag oder Rechnung erforderlich.');
-  if(!analysis.report || !/^\d+$/.test(opts.number)) throw new Error('Rechnungs-/Rapportnummer fehlt.');
+  if(!analysis.documentTitle&&!detectDocumentTitle(analysis.pages[0])) throw new Error('ERP-Dokumenttyp nicht erkannt. Proformarechnung, Kostenvoranschlag, Lieferschein oder Rechnung erforderlich.');
+  if(analysis.referenceConflict) throw new Error('Dokumentnummer und Referenznummer stimmen nicht überein.');
+  if(!analysis.report || opts.number!==analysis.report || !/^\d+$/.test(opts.number)) throw new Error('Rechnungs-/Rapportnummer fehlt.');
   if(!analysis.summary) throw new Error('Originalsummen konnten nicht sicher ausgelesen werden.');
   if (opts.tradeGross>0 && analysis.standaloneTrade && !opts.confirmExtra) throw new Error('Eine eigenständige Eintauschposition ist bereits vorhanden. Es wird kein weiterer Abzug eingefügt.');
   if(opts.tradeGross>0 && analysis.rates.length>1) throw new Error('Mehrere MwSt-Sätze gefunden: Eintausch muss steuerlich manuell zugeordnet werden.');
   const calc=recalculate({...analysis.summary,tradeGross:opts.tradeGross,vatBps:analysis.summary.vatBps});
   if(!sourceRoundingAllowed(calc)) throw new Error(`Originalsummen weichen um ${formatMoney(calc.sourceDifference)} ab (über CHF 0.05). Bitte ERP-Export prüfen.`);
+  const tradeSlot=opts.tradeGross>0?findTradeSlot(analysis):null;
   const doc=await PDFDocument.create();
   for(let i=0;i<analysis.pages.length;i++){
     const p=analysis.pages[i],scale=3.5; // ca. 252 dpi; Originalseiten bleiben im Erscheinungsbild erhalten.
@@ -206,10 +231,7 @@ export async function renderInvoicePdf(analysis,opts) {
     const ctx=canvas.getContext('2d',{alpha:false});ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
     await p.page.render({canvasContext:ctx,viewport}).promise;
     if(i===0) paintTitle(ctx,analysis,scale,opts.number,opts.date);
-    if(opts.tradeGross>0) {
-      const idx=analysis.summaryIdx>0?analysis.summaryIdx-1:analysis.summaryIdx;
-      if(i===idx) paintTradeRow(ctx,analysis,scale,calc.discountNet);
-    }
+    if(tradeSlot && i===tradeSlot.pageIndex) paintTradeRow(ctx,analysis,scale,calc.discountNet,tradeSlot);
     if(opts.tradeGross>0 && i===analysis.summaryIdx) paintSummary(ctx,analysis,scale,{...calc,vatBps:analysis.summary.vatBps});
     const blob=await new Promise((resolve,reject)=>canvas.toBlob(x=>x?resolve(x):reject(new Error('PNG-Export fehlgeschlagen.')),'image/png'));
     const data=await blob.arrayBuffer();
