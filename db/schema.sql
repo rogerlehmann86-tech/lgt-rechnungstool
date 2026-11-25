@@ -1,5 +1,5 @@
 -- LGT Rechnungstool / Supabase PostgreSQL 17+
--- Nur auf einer bewusst ausgewählten, eigenständigen Supabase-Datenbank ausführen.
+-- Ziel: bestehendes Lehmann Werbetool. Ausschliesslich neue lgt_-Objekte; contacts bleibt unverändert.
 -- Benutzende werden ausschliesslich vom Administrator via Supabase Auth angelegt.
 -- Nach dem Anlegen: INSERT INTO public.lgt_staff(user_id) VALUES ('<UUID AUS AUTH USERS>');
 
@@ -14,6 +14,7 @@ create table if not exists public.lgt_invoices (
   invoice_date date not null,
   customer_name text not null check (length(btrim(customer_name)) > 0),
   customer_number text not null default '',
+  contact_id bigint, -- Logische Referenz auf contacts.id; kein FK, damit ERP-Importe ungestört bleiben.
   machine text not null default '',
   original_net_cents bigint not null,
   original_vat_cents bigint not null,
@@ -73,9 +74,12 @@ alter table public.lgt_claims enable row level security;
 alter table public.lgt_claim_events enable row level security;
 
 -- Keine öffentliche Registrierung/Leseberechtigung. Mitarbeitendenliste nur per Supabase Dashboard pflegen.
+revoke all on public.lgt_staff, public.lgt_invoices, public.lgt_claims, public.lgt_claim_events from anon, authenticated;
 grant select on public.lgt_staff to authenticated;
-grant select, insert, update on public.lgt_invoices to authenticated;
-grant select, insert, update on public.lgt_claims to authenticated;
+grant select, insert on public.lgt_invoices to authenticated;
+grant update(files_ready) on public.lgt_invoices to authenticated;
+grant select, insert on public.lgt_claims to authenticated;
+grant update(status, claimed_on, received_on, received_amount_cents, reference, note) on public.lgt_claims to authenticated;
 grant select, insert on public.lgt_claim_events to authenticated;
 
 create policy "lgt_staff_can_read_self" on public.lgt_staff
@@ -106,8 +110,20 @@ create policy "lgt_events_insert" on public.lgt_claim_events for insert to authe
 -- Private Speicherung: keine anonymen Downloads, öffentliche URLs oder Überschreibungen.
 insert into storage.buckets(id,name,public)
 values('lgt-rechnungen','lgt-rechnungen',false)
-on conflict(id) do update set public=false;
+;
 create policy "lgt_pdfs_read" on storage.objects for select to authenticated
   using(bucket_id='lgt-rechnungen' and exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));
 create policy "lgt_pdfs_upload" on storage.objects for insert to authenticated
   with check(bucket_id='lgt-rechnungen' and name like 'invoices/%' and exists(select 1 from public.lgt_staff s where s.user_id=(select auth.uid()) and s.active));
+-- Kundennummer aus dem ERP mit dem vorhandenen Kundenstamm verbinden, ohne diesen zu ändern.
+create index lgt_invoice_contact_idx on public.lgt_invoices(contact_id);
+create function public.lgt_link_contact() returns trigger language plpgsql security invoker set search_path='' as $$
+begin
+  new.contact_id := null;
+  if new.customer_number ~ '^[0-9]{1,18}$' then
+    select c.id into new.contact_id from public.contacts c where c.id = new.customer_number::bigint;
+  end if;
+  return new;
+end; $$;
+revoke all on function public.lgt_link_contact() from public, anon, authenticated;
+create trigger lgt_link_contact_before_insert before insert on public.lgt_invoices for each row execute function public.lgt_link_contact();
