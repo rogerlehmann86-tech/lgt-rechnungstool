@@ -102,7 +102,7 @@ function claimTable(records){
 }
 function renderCreate(){
   const analyzed=Boolean(analysis);
-  screen.innerHTML=`<div class="step-grid"><div class="panel editor"><div class="section-title"><span class="step">1</span><div><h2>ERP-Proformarechnung hochladen</h2><p>Die Datei bleibt bis zum Speichern auf deinem Gerät.</p></div></div><label class="dropzone"><input type="file" id="pdf-file" accept="application/pdf,.pdf"><span class="upload-icon">↑</span><strong>PDF auswählen</strong><small>Originalexport aus deinem ERP – keine Scans</small></label>
+  screen.innerHTML=`<div class="step-grid"><div class="panel editor"><div class="section-title"><span class="step">1</span><div><h2>ERP-Dokument hochladen</h2><p>Die Datei bleibt bis zum Speichern auf deinem Gerät.</p></div></div><label class="dropzone"><input type="file" id="pdf-file" accept="application/pdf,.pdf"><span class="upload-icon">↑</span><strong>PDF auswählen</strong><small>Proformarechnung, Kostenvoranschlag oder Rechnung – keine Scans</small></label>
     <div id="editor-fields">${analyzed?createFields():`<div class="empty compact">Nach dem Hochladen werden die erkannten Rechnungsangaben hier angezeigt.</div>`}</div></div>
     <div class="panel preview-panel"><div class="section-title"><span class="step">2</span><div><h2>Rechnung kontrollieren</h2><p>Nach Berechnung eine Vorschau erstellen und visuell prüfen.</p></div></div>
     <div id="calc-panel">${analyzed?renderCalculation():`<div class="preview-placeholder">PDF-Vorschau erscheint hier.</div>`}</div>
@@ -143,7 +143,7 @@ async function checkCustomer(){
 }
 function createFields(){
   const s=analysis.summary;
-  return `<div class="divider"></div><div class="form-grid"><label>Rechnungsnummer (= Rapport)<input id="invoice-number" value="${esc(analysis.report)}" readonly></label><label>Rechnungsdatum<input id="invoice-date" type="date" value="${swissDate()}" required></label>
+  return `<div class="divider"></div><p class="helper">Erkannter Dokumenttyp: <strong>${esc(analysis.documentType||"Nicht erkannt")}</strong></p><div class="form-grid"><label>Rechnungsnummer (= Rapport)<input id="invoice-number" value="${esc(analysis.report)}" readonly></label><label>Rechnungsdatum<input id="invoice-date" type="date" value="${esc(analysis.existingDate||swissDate())}" required></label>
     <label class="full">Kundenname <small>(aus Kundenstamm, bei Bedarf korrigieren)</small><input id="customer-name" value="${esc(analysis.customer)}" placeholder="Vorname Nachname" required></label>
     <label>Kundennummer<input id="customer-number" value="${esc(analysis.customerNo)}"></label><label>Mehrwertsteuer<input value="${s?(s.vatBps/100).toFixed(2)+'%':'Nicht erkannt'}" disabled></label>
     <div class="full helper" id="customer-match" aria-live="polite"></div><label class="full">Maschine<input id="machine" value="${esc(analysis.machine)}"></label>
@@ -175,13 +175,15 @@ async function loadFile(file){
   if(!file.name.toLowerCase().endsWith('.pdf'))throw new Error('Bitte eine PDF-Datei wählen.');
   if(file.size>18*1024*1024)throw new Error('Datei über 18 MB; bitte einen kompakteren ERP-Export verwenden.');
   analysis=null;resetPreview();sourceBytes=new Uint8Array(await file.arrayBuffer());analysis=await analyzePdf(sourceBytes);
-  if(!analysis.report)alertBox('Rapportnummer nicht erkannt. Bitte Vorlage prüfen.','warning');
+  if(!analysis.documentTitle)alertBox('Dokumenttitel nicht erkannt. Bitte eine ERP-Proformarechnung, einen Kostenvoranschlag oder eine Rechnung verwenden.','warning');
+  else if(!analysis.report)alertBox('Rapportnummer nicht erkannt. Bitte Vorlage prüfen.','warning');
   else if(!analysis.summary)alertBox('Originalsummen nicht eindeutig erkannt. Keine PDF-Freigabe möglich.','warning');
   else if(analysis.rates.length>1)alertBox('Mehrere MwSt-Sätze erkannt. Bei Eintausch ist eine steuerliche Prüfung notwendig.','warning');
   else clearAlert();
   renderCreate();
 }
 function getCreateValues(){
+  if(!analysis?.documentTitle)throw new Error('Kein unterstützter ERP-Dokumenttitel erkannt.');
   const calc=getCalculation();
   const number=$('#invoice-number')?.value.trim(), customer=$('#customer-name')?.value.trim(), date=$('#invoice-date')?.value;
   const customerNo=$('#customer-number')?.value.trim()||'',machine=$('#machine')?.value.trim()||'';

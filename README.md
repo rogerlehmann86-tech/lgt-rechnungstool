@@ -1,6 +1,6 @@
 # LGT – Rechnungstool
 
-Interne Web-Anwendung der **Lehmann Gerätetechnik GmbH** zur Umwandlung von ERP-Proformarechnungen in Rechnungen, für das Rechnungsarchiv und zur Nachverfolgung von Husqvarna-Eintauschprämien.
+Interne Web-Anwendung der **Lehmann Gerätetechnik GmbH** zur Umwandlung von ERP-Proformarechnungen und Kostenvoranschlägen in Rechnungen sowie zur Verarbeitung bestehender ERP-Rechnungen, für das Rechnungsarchiv und zur Nachverfolgung von Husqvarna-Eintauschprämien.
 
 ## Status
 
@@ -32,7 +32,7 @@ Für die Veröffentlichung GitHub Pages oder ein anderes statisches Hosting nutz
 
 ## Arbeitsschritte im Alltag
 
-1. **Rechnung erstellen** öffnen, Proformarechnung aus ERP als *textbasiertes* PDF hochladen.
+1. **Rechnung erstellen** öffnen, Proformarechnung, Kostenvoranschlag oder Rechnung aus ERP als *textbasiertes* PDF hochladen. Der Dokumenttitel wird erkannt; alle drei Typen werden als Rechnung mit Rapportnummer ausgegeben. Bei bestehenden Rechnungen wird das vorhandene Rechnungsdatum, sofern erkannt, vorgeschlagen.
 2. Datum, Kundendaten und extrahierte Beträge prüfen. Bei vorhandenem eigenständigem Eintausch nur "Eintausch bereits enthalten" auswählen.
 3. Bei zusätzlichem Eintausch den **Bruttobetrag (inkl. MwSt.)** eingeben. Herstellerprämie separat erfassen; niemals ein zweites Mal vom Kundenbetrag abziehen.
 4. PDF-Vorschau generieren, **alle Seiten**, Artikelpositionen, Eintausch, Total und MwSt prüfen und Bestätigung anhaken.

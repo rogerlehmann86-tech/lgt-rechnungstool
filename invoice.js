@@ -42,6 +42,31 @@ function parseSummary(rows) {
       rowSum:sum.row,rowVat:vat.row,rowTotal:total.row};
   } catch {return null;}
 }
+// Only recognise document headings on the first page, not references in item descriptions.
+export function detectDocumentTitle(page) {
+  const pattern=/^(Proforma\s*[-–]?\s*rechnung|Kostenvoranschlag|Rechnung)(?=\s|:|$)(?:\s*(?:Nr\.?|Nummer|#)\s*:?\s*\d+|\s+\d+)?\s*:?\s*$/i;
+  const candidates=[];
+  for(const row of page.rows){
+    if(row.y<page.height*.48)continue;
+    const left=row.items.filter(i=>normalize(i.str)&&i.transform[4]<page.width*.48).sort((a,b)=>a.transform[4]-b.transform[4]);
+    if(!left.length)continue;
+    const match=normalize(left.map(i=>i.str).join(' ')).match(pattern);
+    if(!match)continue;
+    const type=/^proforma/i.test(match[1])?'Proformarechnung':/^kosten/i.test(match[1])?'Kostenvoranschlag':'Rechnung';
+    candidates.push({type,item:left[0],items:left,row});
+  }
+  return candidates.length===1?candidates[0]:null;
+}
+export function originalInvoiceDate(page,title) {
+  if(!title||title.type!=='Rechnung')return '';
+  const text=rowText(title.row);
+  const m=text.match(/\bSutz\s*,\s*(\d{1,2})\.(\d{1,2})\.(\d{4})\b/i);
+  if(!m)return '';
+  const iso=m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+  const date=new Date(iso+'T12:00:00Z');
+  return !Number.isNaN(date.getTime())&&date.toISOString().slice(0,10)===iso?iso:'';
+}
+
 export async function analyzePdf(bytes) {
   const lib=await getPdfJs();
   const source = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -53,6 +78,8 @@ export async function analyzePdf(bytes) {
     const rows=makeRows(text.items);
     pages.push({page,items:text.items,rows,width:page.view[2]-page.view[0],height:page.view[3]-page.view[1]});
   }
+  const documentTitle=detectDocumentTitle(pages[0]);
+  const existingDate=originalInvoiceDate(pages[0],documentTitle);
   const allLines=pages.flatMap(p=>p.rows.map(rowText));
   const whole=allLines.join('\n');
   const matchReport=whole.match(/Rapport[\s-]*Nr\.?\s*:?\s*(\d{3,10})/i);
@@ -72,7 +99,7 @@ export async function analyzePdf(bytes) {
   const grossMatch=premiumLine.match(/\(\s*(\d[\d’' ]*(?:[.,]\d{2})?)\s*[.,-]*\s*inkl\.?/i);
   let premiumGross=0;
   if(grossMatch){try {premiumGross=parseMoney(grossMatch[1]);}catch {}}
-  return {doc,pages,report,customer,customerNo:matchCustomerNo?.[1]??'',machine,
+  return {doc,pages,documentTitle,documentType:documentTitle?.type??'',existingDate,report,customer,customerNo:matchCustomerNo?.[1]??'',machine,
     summaryIdx,summary,rates,standaloneTrade,premiumGross,rawText:whole,byteLength:source.length};
 }
 function putText(ctx,x,y,label,fontSize,color='#161616',align='left') {
@@ -82,18 +109,24 @@ function putText(ctx,x,y,label,fontSize,color='#161616',align='left') {
 }
 function paintTitle(ctx,analysis,scale,invoiceNumber,date) {
   const {items,width,height}=analysis.pages[0];
-  const title=items.find(i=>/\bProformarechnung\b/i.test(i.str));
-  if(!title) throw new Error('Der Titel «Proformarechnung» wurde nicht gefunden. Diese Vorlage muss zuerst geprüft werden.');
+  const heading=analysis.documentTitle??detectDocumentTitle(analysis.pages[0]);
+  if(!heading) throw new Error('Kein eindeutiger ERP-Dokumenttitel erkannt. Unterstützt: Proformarechnung, Kostenvoranschlag und Rechnung.');
+  const title=heading.item;
   const x=title.transform[4]*scale,base=(height-title.transform[5])*scale;
   const font=Math.max(10,(title.height||13)*scale);
-  ctx.fillStyle='#fff';ctx.fillRect(x-3*scale,base-font*1.30,Math.min(width*scale-x-3*scale,310*scale),font*1.65);
-  putText(ctx,x,base,`Rechnung Nr. ${invoiceNumber}`,font);
-  const dateItems=items.filter(i=>/\bSutz\s*,/i.test(i.str));
-  if(!dateItems.length) throw new Error('Datumsposition «Sutz,» nicht gefunden.');
+  const dateItems=items.filter(i=>i.transform[4]>width*.48&&Math.abs(i.transform[5]-title.transform[5])<5&&/^Sutz\s*,/i.test(normalize(i.str)));
+  if(!dateItems.length) throw new Error('Datumsposition «Sutz,» neben dem Dokumenttitel nicht gefunden.');
   const d=dateItems[0],dx=d.transform[4]*scale,dy=(height-d.transform[5])*scale;
+  const label='Rechnung Nr. '+invoiceNumber;
+  ctx.font=font+'px Arial, Helvetica, sans-serif';
+  const titleEnd=Math.max(...heading.items.map(i=>(i.transform[4]+(i.width||0))*scale));
+  const right=Math.max(titleEnd+3*scale,x+ctx.measureText(label).width+3*scale);
+  if(right>dx-5*scale)throw new Error('Rechnungstitel hat nicht genügend Platz neben dem Datum.');
+  ctx.fillStyle='#fff';ctx.fillRect(x-3*scale,base-font*1.30,right-x+3*scale,font*1.65);
+  putText(ctx,x,base,label,font);
   const df=Math.max(9,(d.height||11)*scale);
   ctx.fillStyle='#fff';ctx.fillRect(dx-3*scale,dy-df*1.3,width*scale-dx-12*scale,df*1.65);
-  putText(ctx,dx,dy,`Sutz, ${chDate(date)}`,df);
+  putText(ctx,dx,dy,'Sutz, '+chDate(date),df);
 }
 function paintSummary(ctx,analysis,scale,calc) {
   const {summary}=analysis;
@@ -137,6 +170,7 @@ function paintTradeRow(ctx,analysis,scale,discountNet) {
 export async function renderInvoicePdf(analysis,opts) {
   const {PDFDocument}=window.PDFLib??{};
   if(!PDFDocument) throw new Error('PDF-Bibliothek nicht geladen. Bitte Seite neu laden.');
+  if(!analysis.documentTitle&&!detectDocumentTitle(analysis.pages[0])) throw new Error('ERP-Dokumenttyp nicht erkannt. Proformarechnung, Kostenvoranschlag oder Rechnung erforderlich.');
   if(!analysis.report || !/^\d+$/.test(opts.number)) throw new Error('Rechnungs-/Rapportnummer fehlt.');
   if(!analysis.summary) throw new Error('Originalsummen konnten nicht sicher ausgelesen werden.');
   if (opts.tradeGross>0 && analysis.standaloneTrade && !opts.confirmExtra) throw new Error('Eine eigenständige Eintauschposition ist bereits vorhanden. Es wird kein weiterer Abzug eingefügt.');
